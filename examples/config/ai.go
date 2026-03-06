@@ -11,20 +11,18 @@ import (
 
 	"github.com/sadhakbj/aisdk-go"
 	"github.com/sadhakbj/aisdk-go/providers/anthropic"
+	"github.com/sadhakbj/aisdk-go/providers/gemini"
 	"github.com/sadhakbj/aisdk-go/providers/openai"
 )
 
 func init() {
 	aisdk.Configure(&aisdk.Config{
 		Providers: map[string]aisdk.ProviderConfig{
-			"openai": &openai.Config{
-				APIKey:  os.Getenv("OPENAI_API_KEY"),
-				BaseURL: "", // Optional: for proxies
-			},
-			"anthropic": &anthropic.Config{
-				APIKey: os.Getenv("ANTHROPIC_API_KEY"),
-			},
+			"openai":    &openai.Config{APIKey: os.Getenv("OPENAI_API_KEY")},
+			"anthropic": &anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY")},
+			"gemini":    &gemini.Config{APIKey: os.Getenv("GEMINI_API_KEY"), BaseURL: os.Getenv("GEMINI_BASE_URL")},
 		},
+		// Change this to "anthropic" or "gemini" to run all examples on a different provider.
 		Default: "openai",
 	})
 }
