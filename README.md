@@ -23,6 +23,7 @@ go get github.com/sadhakbj/aisdk-go
 - **Streaming** — Channel-based streaming with typed events
 - **Structured output** — `GenerateObject[T]()` with generics for compile-time type safety
 - **Tool calling** — Auto multi-step tool loop with JSON schema from struct tags
+- **Built-in web search** — Drop-in `WebSearchTool` backed by Brave Search or SerpAPI
 - **Conversations** — Pluggable `ConversationStore` with in-memory default
 - **Middleware** — Intercept/modify prompts before they reach the model
 - **HTTP handlers** — SSE and Vercel AI SDK Data Stream Protocol (works with Next.js `useChat()`)
@@ -195,6 +196,49 @@ func (t *WeatherTool) Execute(ctx context.Context, args json.RawMessage) (any, e
     json.Unmarshal(args, &p)
     return map[string]any{"temp_f": 72, "condition": "sunny"}, nil
 }
+```
+
+## Built-in Web Search Tool
+
+`aisdk-go` ships a ready-to-use `WebSearchTool` in the `tools` sub-package. Drop it into any agent to give it real-time web access — no custom tool implementation needed.
+
+```go
+import "github.com/sadhakbj/aisdk-go/tools"
+
+agent := aisdk.NewBaseAgent(aisdk.AgentConfig{
+    Model:        "smart",
+    Instructions: "You are a research assistant. Use web_search to find up-to-date information.",
+    Tools: []aisdk.Tool{
+        tools.NewBraveWebSearch(os.Getenv("BRAVE_API_KEY")),
+    },
+    MaxSteps: 5,
+})
+
+result, _ := agent.Prompt(ctx, "What are the latest Go releases?")
+```
+
+### Supported Search Backends
+
+| Backend | Constructor | API key source |
+|---------|-------------|----------------|
+| [Brave Search](https://brave.com/search/api/) | `tools.NewBraveWebSearch(apiKey)` | [brave.com/search/api](https://brave.com/search/api/) — free tier available |
+| [SerpAPI](https://serpapi.com/) | `tools.NewSerpAPIWebSearch(apiKey)` | [serpapi.com](https://serpapi.com/) |
+
+### Custom Search Backend
+
+Implement the `tools.SearchProvider` interface to plug in any search API:
+
+```go
+type SearchProvider interface {
+    Search(ctx context.Context, query string, maxResults int) ([]tools.WebSearchResult, error)
+}
+
+tool := tools.NewWebSearch(tools.WebSearchConfig{
+    Provider:   &MySearchProvider{},
+    MaxResults: 5,
+    Name:        "my_search",         // optional, default: "web_search"
+    Description: "Search my index.",  // optional
+})
 ```
 
 ## Conversations
