@@ -68,9 +68,14 @@ type textModel struct {
 }
 
 func (m *textModel) Generate(ctx context.Context, req *aisdk.TextRequest) (*aisdk.TextResult, error) {
+	// WebSearch requires the Responses API — a different endpoint and format.
+	if hasWebSearch(req.BuiltinTools) {
+		return m.generateWithResponses(ctx, req)
+	}
+
 	body := m.buildRequestBody(req, false)
 
-	respBody, err := m.doRequest(ctx, body)
+	respBody, err := m.doRequest(ctx, m.provider.config.baseURL()+"/chat/completions", body)
 	if err != nil {
 		return nil, err
 	}
@@ -107,9 +112,14 @@ func (m *textModel) Generate(ctx context.Context, req *aisdk.TextRequest) (*aisd
 }
 
 func (m *textModel) Stream(ctx context.Context, req *aisdk.TextRequest) (*aisdk.TextStreamResult, error) {
+	// WebSearch requires the Responses API — a different endpoint and format.
+	if hasWebSearch(req.BuiltinTools) {
+		return m.streamWithResponses(ctx, req)
+	}
+
 	body := m.buildRequestBody(req, true)
 
-	respBody, err := m.doRequest(ctx, body)
+	respBody, err := m.doRequest(ctx, m.provider.config.baseURL()+"/chat/completions", body)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +135,7 @@ func (m *textModel) Stream(ctx context.Context, req *aisdk.TextRequest) (*aisdk.
 	return &aisdk.TextStreamResult{Events: ch}, nil
 }
 
-// --- Request building ---
+// --- Chat Completions (standard, no web search) ---
 
 func (m *textModel) buildRequestBody(req *aisdk.TextRequest, stream bool) map[string]any {
 	body := map[string]any{
@@ -176,7 +186,7 @@ func (m *textModel) buildRequestBody(req *aisdk.TextRequest, stream bool) map[st
 
 	body["messages"] = messages
 
-	// Tools
+	// Tools (client-side functions only)
 	if len(req.Tools) > 0 {
 		var tools []map[string]any
 		for _, t := range req.Tools {
@@ -226,13 +236,200 @@ func (m *textModel) buildRequestBody(req *aisdk.TextRequest, stream bool) map[st
 	return body
 }
 
-func (m *textModel) doRequest(ctx context.Context, body map[string]any) (io.ReadCloser, error) {
+// --- Responses API (used for WebSearch) ---
+
+// generateWithResponses calls POST /v1/responses with the built-in web_search tool.
+// The Responses API works with standard models (gpt-4o, gpt-4o-mini) and lets
+// the model decide when to search, unlike Chat Completions + web_search_options.
+func (m *textModel) generateWithResponses(ctx context.Context, req *aisdk.TextRequest) (*aisdk.TextResult, error) {
+	body := m.buildResponsesBody(req)
+
+	respBody, err := m.doRequest(ctx, m.provider.config.baseURL()+"/responses", body)
+	if err != nil {
+		return nil, err
+	}
+	defer respBody.Close()
+
+	var apiResp responsesAPIResponse
+	if err := json.NewDecoder(respBody).Decode(&apiResp); err != nil {
+		return nil, fmt.Errorf("openai: failed to decode responses API response: %w", err)
+	}
+
+	return parseResponsesResult(&apiResp), nil
+}
+
+// streamWithResponses calls POST /v1/responses with stream:true.
+func (m *textModel) streamWithResponses(ctx context.Context, req *aisdk.TextRequest) (*aisdk.TextStreamResult, error) {
+	body := m.buildResponsesBody(req)
+	body["stream"] = true
+
+	respBody, err := m.doRequest(ctx, m.provider.config.baseURL()+"/responses", body)
+	if err != nil {
+		return nil, err
+	}
+
+	ch := make(chan aisdk.StreamEvent)
+
+	go func() {
+		defer close(ch)
+		defer respBody.Close()
+		parseResponsesSSEStream(respBody, ch)
+	}()
+
+	return &aisdk.TextStreamResult{Events: ch}, nil
+}
+
+func (m *textModel) buildResponsesBody(req *aisdk.TextRequest) map[string]any {
+	body := map[string]any{
+		"model": m.model,
+	}
+
+	// System prompt is "instructions" in the Responses API
+	if req.System != "" {
+		body["instructions"] = req.System
+	}
+
+	// Build input (messages)
+	var input []map[string]any
+	for _, msg := range req.Messages {
+		switch msg.Role {
+		case aisdk.RoleUser:
+			input = append(input, map[string]any{
+				"role":    "user",
+				"content": msg.Content,
+			})
+		case aisdk.RoleAssistant:
+			input = append(input, map[string]any{
+				"role":    "assistant",
+				"content": msg.Content,
+			})
+		}
+	}
+	body["input"] = input
+
+	// Built-in tools
+	var tools []map[string]any
+	for _, bt := range req.BuiltinTools {
+		switch v := bt.(type) {
+		case *aisdk.WebSearch:
+			tool := map[string]any{"type": "web_search"}
+			if len(v.AllowedDomains) > 0 {
+				tool["filters"] = map[string]any{"allowed_domains": v.AllowedDomains}
+			}
+			if v.UserLocation != nil {
+				loc := map[string]any{"type": "approximate"}
+				if v.UserLocation.Country != "" {
+					loc["country"] = v.UserLocation.Country
+				}
+				if v.UserLocation.City != "" {
+					loc["city"] = v.UserLocation.City
+				}
+				if v.UserLocation.Region != "" {
+					loc["region"] = v.UserLocation.Region
+				}
+				if v.UserLocation.Timezone != "" {
+					loc["timezone"] = v.UserLocation.Timezone
+				}
+				tool["user_location"] = loc
+			}
+			tools = append(tools, tool)
+		}
+	}
+	if len(tools) > 0 {
+		body["tools"] = tools
+	}
+
+	if req.Temperature != nil {
+		body["temperature"] = *req.Temperature
+	}
+	if req.MaxTokens != nil {
+		body["max_output_tokens"] = *req.MaxTokens
+	}
+
+	return body
+}
+
+// parseResponsesResult extracts text and usage from a Responses API response.
+// It skips web_search_call output items and reads only message output items.
+func parseResponsesResult(resp *responsesAPIResponse) *aisdk.TextResult {
+	result := &aisdk.TextResult{
+		FinishReason: aisdk.FinishStop,
+		Usage: aisdk.Usage{
+			PromptTokens:     resp.Usage.InputTokens,
+			CompletionTokens: resp.Usage.OutputTokens,
+			TotalTokens:      resp.Usage.TotalTokens,
+		},
+	}
+
+	for _, item := range resp.Output {
+		if item.Type == "message" {
+			for _, part := range item.Content {
+				if part.Type == "output_text" {
+					result.Content += part.Text
+				}
+			}
+		}
+	}
+
+	return result
+}
+
+// parseResponsesSSEStream parses the Responses API SSE stream.
+func parseResponsesSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
+	scanner := bufio.NewScanner(body)
+
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			return
+		}
+
+		var event responsesSSEEvent
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			continue
+		}
+
+		switch event.Type {
+		case "response.output_text.delta":
+			if event.Delta != "" {
+				ch <- &aisdk.TextDelta{Text: event.Delta}
+			}
+		case "response.completed":
+			if event.Response != nil {
+				usage := aisdk.Usage{
+					PromptTokens:     event.Response.Usage.InputTokens,
+					CompletionTokens: event.Response.Usage.OutputTokens,
+					TotalTokens:      event.Response.Usage.TotalTokens,
+				}
+				ch <- &aisdk.StreamEnd{FinishReason: aisdk.FinishStop, Usage: usage}
+			}
+		case "response.failed", "error":
+			ch <- &aisdk.ErrorEvent{
+				Err:         fmt.Errorf("openai responses stream error: %s", event.Type),
+				Recoverable: false,
+			}
+			return
+		}
+	}
+}
+
+// --- Shared HTTP helper ---
+
+func (m *textModel) doRequest(ctx context.Context, url string, body map[string]any) (io.ReadCloser, error) {
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("openai: failed to marshal request: %w", err)
 	}
 
-	url := m.provider.config.baseURL() + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("openai: failed to create request: %w", err)
@@ -266,7 +463,7 @@ func (m *textModel) doRequest(ctx context.Context, body map[string]any) (io.Read
 	return resp.Body, nil
 }
 
-// --- SSE stream parsing ---
+// --- SSE stream parsing (Chat Completions) ---
 
 func (m *textModel) parseSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
 	scanner := bufio.NewScanner(body)
@@ -346,7 +543,7 @@ func (m *textModel) parseSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) 
 	}
 }
 
-// --- API types ---
+// --- API types: Chat Completions ---
 
 type chatCompletionResponse struct {
 	ID      string   `json:"id"`
@@ -394,9 +591,9 @@ type chunkChoice struct {
 }
 
 type chunkDelta struct {
-	Role      string           `json:"role,omitempty"`
-	Content   string           `json:"content,omitempty"`
-	ToolCalls []chunkToolCall  `json:"tool_calls,omitempty"`
+	Role      string          `json:"role,omitempty"`
+	Content   string          `json:"content,omitempty"`
+	ToolCalls []chunkToolCall `json:"tool_calls,omitempty"`
 }
 
 type chunkToolCall struct {
@@ -410,6 +607,36 @@ type toolCallAccumulator struct {
 	ID        string
 	Name      string
 	Arguments string
+}
+
+// --- API types: Responses API ---
+
+type responsesAPIResponse struct {
+	ID     string               `json:"id"`
+	Output []responsesOutputItem `json:"output"`
+	Usage  responsesUsage       `json:"usage"`
+}
+
+type responsesOutputItem struct {
+	Type    string                `json:"type"` // "message" | "web_search_call"
+	Content []responsesContentPart `json:"content,omitempty"`
+}
+
+type responsesContentPart struct {
+	Type string `json:"type"` // "output_text"
+	Text string `json:"text,omitempty"`
+}
+
+type responsesUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	TotalTokens  int `json:"total_tokens"`
+}
+
+type responsesSSEEvent struct {
+	Type     string                `json:"type"`
+	Delta    string                `json:"delta,omitempty"`
+	Response *responsesAPIResponse `json:"response,omitempty"`
 }
 
 // --- Helpers ---
@@ -442,4 +669,14 @@ func mapFinishReason(reason string) aisdk.FinishReason {
 	default:
 		return aisdk.FinishUnknown
 	}
+}
+
+// hasWebSearch reports whether any builtin tool is a WebSearch.
+func hasWebSearch(tools []aisdk.BuiltinTool) bool {
+	for _, bt := range tools {
+		if _, ok := bt.(*aisdk.WebSearch); ok {
+			return true
+		}
+	}
+	return false
 }

@@ -19,7 +19,7 @@ func init() {
 		Providers: map[string]aisdk.ProviderConfig{
 			"openai": &openai.Config{
 				APIKey:  os.Getenv("OPENAI_API_KEY"),
-				BaseURL: "", // Optional: for proxies
+				BaseURL: os.Getenv("OPENAI_BASE_URL"), // Optional: for proxies
 			},
 			"anthropic": &anthropic.Config{
 				APIKey: os.Getenv("ANTHROPIC_API_KEY"),

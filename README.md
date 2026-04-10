@@ -23,6 +23,7 @@ go get github.com/sadhakbj/aisdk-go
 - **Streaming** — Channel-based streaming with typed events
 - **Structured output** — `GenerateObject[T]()` with generics for compile-time type safety
 - **Tool calling** — Auto multi-step tool loop with JSON schema from struct tags
+- **Provider-native web search** — `&aisdk.WebSearch{}` delegates to OpenAI Responses API or Anthropic's built-in search — no third-party key needed
 - **Conversations** — Pluggable `ConversationStore` with in-memory default
 - **Middleware** — Intercept/modify prompts before they reach the model
 - **HTTP handlers** — SSE and Vercel AI SDK Data Stream Protocol (works with Next.js `useChat()`)
@@ -195,6 +196,61 @@ func (t *WeatherTool) Execute(ctx context.Context, args json.RawMessage) (any, e
     json.Unmarshal(args, &p)
     return map[string]any{"temp_f": 72, "condition": "sunny"}, nil
 }
+```
+
+## Provider-Native Web Search
+
+`aisdk.WebSearch` gives agents real-time web access by delegating to the AI provider's own search infrastructure — no third-party API key needed. Add it to `Tools` alongside any other tools.
+
+```go
+agent := aisdk.NewBaseAgent(aisdk.AgentConfig{
+    Model:        "smart",
+    Instructions: "You are a research assistant with access to the web.",
+    Tools: []aisdk.Tool{
+        &aisdk.WebSearch{},
+    },
+})
+
+result, _ := agent.Prompt(ctx, "What are the latest Go releases?")
+```
+
+Switch providers in `config/ai.go` — the agent code stays the same:
+
+| Provider | How it works |
+|----------|-------------|
+| **OpenAI** | Uses the [Responses API](https://platform.openai.com/docs/guides/tools-web-search) (`/v1/responses`) with `{"type": "web_search"}`. Model decides when to search. Standard models (`gpt-4o`, `gpt-4o-mini`). |
+| **Anthropic** | Uses `web_search_20250305` built-in tool in the Messages API. Any Claude model. |
+
+### Options
+
+```go
+&aisdk.WebSearch{
+    // Limit how many searches the provider may perform (Anthropic: max_uses).
+    MaxResults: 5,
+
+    // Restrict results to specific domains (both providers).
+    AllowedDomains: []string{"pubmed.ncbi.nlm.nih.gov", "who.int", "cdc.gov"},
+
+    // Refine results by user location (both providers).
+    UserLocation: &aisdk.WebSearchLocation{
+        Country:  "US",
+        City:     "New York",
+        Region:   "New York",
+        Timezone: "America/New_York", // OpenAI only
+    },
+}
+```
+
+### Mixing with client-side tools
+
+`WebSearch` goes in the same `Tools` slice as your own tools — the SDK splits them automatically:
+
+```go
+Tools: []aisdk.Tool{
+    &aisdk.WebSearch{},   // provider handles this server-side
+    &WeatherTool{},       // your code handles this via Execute()
+    &CalendarTool{},
+},
 ```
 
 ## Conversations

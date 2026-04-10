@@ -1,6 +1,10 @@
 package aisdk
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+)
 
 // Provider represents an AI provider (OpenAI, Anthropic, etc.).
 // Implement this interface to add a new provider to the SDK.
@@ -46,14 +50,15 @@ type ProviderConfig interface {
 
 // TextRequest is the unified request sent to a TextModel.
 type TextRequest struct {
-	Model        string    `json:"model"`
-	System       string    `json:"system,omitempty"`
-	Messages     []Message `json:"messages"`
-	Tools        []ToolDef `json:"tools,omitempty"`
-	Temperature  *float64  `json:"temperature,omitempty"`
-	MaxTokens    *int      `json:"max_tokens,omitempty"`
-	TopP         *float64  `json:"top_p,omitempty"`
-	StopSequences []string `json:"stop,omitempty"`
+	Model          string       `json:"model"`
+	System         string       `json:"system,omitempty"`
+	Messages       []Message    `json:"messages"`
+	Tools          []ToolDef    `json:"tools,omitempty"`
+	BuiltinTools   []BuiltinTool `json:"-"`
+	Temperature    *float64     `json:"temperature,omitempty"`
+	MaxTokens      *int         `json:"max_tokens,omitempty"`
+	TopP           *float64     `json:"top_p,omitempty"`
+	StopSequences  []string     `json:"stop,omitempty"`
 	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 }
 
@@ -62,6 +67,62 @@ type ToolDef struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Parameters  any    `json:"parameters"` // JSON Schema object
+}
+
+// BuiltinTool marks a tool that is executed natively by the AI provider's
+// servers, not by client code. Unlike Tool, there is no Execute method —
+// the provider translates it to its own API format.
+type BuiltinTool interface {
+	builtinToolName() string
+}
+
+// WebSearch enables the AI provider's built-in web search capability.
+// No third-party API key required — the provider handles searching server-side.
+//
+// Usage:
+//
+//	agent := aisdk.NewBaseAgent(aisdk.AgentConfig{
+//	    BuiltinTools: []aisdk.BuiltinTool{
+//	        &aisdk.WebSearch{
+//	            AllowedDomains: []string{"pubmed.ncbi.nlm.nih.gov", "who.int"},
+//	            UserLocation:   &aisdk.WebSearchLocation{Country: "US", City: "New York"},
+//	        },
+//	    },
+//	})
+type WebSearch struct {
+	// MaxResults limits how many searches the provider may make (Anthropic: max_uses).
+	MaxResults int
+	// AllowedDomains restricts results to specific domains.
+	// Anthropic: top-level allowed_domains. OpenAI: filters.allowed_domains.
+	AllowedDomains []string
+	// UserLocation refines results based on the user's approximate location.
+	// Supported by both Anthropic and OpenAI.
+	UserLocation *WebSearchLocation
+}
+
+// WebSearchLocation provides geographic context to refine web search results.
+type WebSearchLocation struct {
+	// Country is the two-letter ISO country code (e.g. "US", "GB").
+	Country string
+	// City is the user's city.
+	City string
+	// Region is the user's region or state.
+	Region string
+	// Timezone is the IANA timezone string (e.g. "America/New_York"). OpenAI only.
+	Timezone string
+}
+
+func (w *WebSearch) builtinToolName() string { return "web_search" }
+
+// WebSearch implements Tool so it can be added to AgentConfig.Tools alongside
+// regular client-side tools. The agent detects it as a BuiltinTool and sends
+// it to the provider as a native capability rather than a function definition.
+
+func (w *WebSearch) Name() string        { return "web_search" }
+func (w *WebSearch) Description() string { return "Search the web for current information." }
+func (w *WebSearch) Parameters() any     { return nil }
+func (w *WebSearch) Execute(_ context.Context, _ json.RawMessage) (any, error) {
+	return nil, fmt.Errorf("web_search is executed server-side by the AI provider")
 }
 
 // ResponseFormat controls structured output mode.
