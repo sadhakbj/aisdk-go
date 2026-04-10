@@ -17,7 +17,7 @@ func main() {
 	// OpenAI knows: smart → gpt-4o, fast → gpt-4o-mini
 	result, err := aisdk.GenerateText(ctx, aisdk.TextParams{
 		Model:  "smart",
-		Prompt: "Who is current PM of Nepal?",
+		Prompt: "Explain goroutines in one paragraph.",
 	})
 	if err != nil {
 		log.Fatal(err)
