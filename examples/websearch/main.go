@@ -1,24 +1,31 @@
-// Example: agent with built-in WebSearchTool.
+// Example: agent with provider-native web search.
 //
-// This example shows how to use the tools.NewBraveWebSearch() tool
-// (or tools.NewSerpAPIWebSearch()) to give an agent the ability to
-// search the web for up-to-date information.
+// aisdk.WebSearch delegates searching to the AI provider's own servers —
+// no third-party API key required.
 //
-// Prerequisites:
+// Provider behaviour:
 //
+//	Anthropic — any Claude model; model decides when to search (conditional).
+//	OpenAI    — model is auto-remapped to gpt-4o-search-preview; always searches.
+//
+// Switch providers by changing Default in examples/config/ai.go.
+//
+// Prerequisites (set whichever provider you want to use):
+//
+//	ANTHROPIC_API_KEY=sk-ant-...
 //	OPENAI_API_KEY=sk-...
-//	BRAVE_API_KEY=...   (get a free key at https://brave.com/search/api/)
+//
+// Note: the auto-remapped model comment below is outdated — OpenAI now uses
+// the Responses API (/v1/responses) which works with standard models (gpt-4o).
 package main
 
 import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/sadhakbj/aisdk-go"
 	_ "github.com/sadhakbj/aisdk-go/examples/config"
-	"github.com/sadhakbj/aisdk-go/tools"
 )
 
 type ResearchAssistant struct {
@@ -30,12 +37,10 @@ func NewResearchAssistant() *ResearchAssistant {
 		BaseAgent: aisdk.NewBaseAgent(aisdk.AgentConfig{
 			Model: "smart",
 			Instructions: "You are a helpful research assistant with access to the web. " +
-				"When asked about current events or facts you're unsure about, use the web_search tool " +
-				"to look up accurate, up-to-date information before answering.",
+				"Search for accurate, up-to-date information when needed.",
 			Tools: []aisdk.Tool{
-				tools.NewBraveWebSearch(os.Getenv("BRAVE_API_KEY")),
+				&aisdk.WebSearch{MaxResults: 5},
 			},
-			MaxSteps: 5,
 		}),
 	}
 }
@@ -45,15 +50,11 @@ func main() {
 
 	assistant := NewResearchAssistant()
 
-	result, err := assistant.Prompt(ctx, "What are the latest Go programming language releases?")
+	result, err := assistant.Prompt(ctx, "What is the current latest go version and when was it released?")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println("Response:", result.Text)
-	fmt.Printf("Steps: %d\n", len(result.Steps))
-	fmt.Printf("Tool calls: %d\n", len(result.ToolCalls))
-	for _, tc := range result.ToolCalls {
-		fmt.Printf("  - %s(%s)\n", tc.Name, string(tc.Arguments))
-	}
+	fmt.Printf("Provider: %s | Model: %s\n\n", result.Provider, result.Model)
+	fmt.Println(result.Text)
 }

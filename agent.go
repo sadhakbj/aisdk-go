@@ -31,12 +31,15 @@ type AgentConfig struct {
 	Provider     string
 	Model        string
 	Instructions string
-	Tools        []Tool
-	MaxSteps     int
-	Temperature  float64
-	MaxTokens    int
-	Timeout      time.Duration
-	Middleware   []Middleware
+	// Tools is the list of tools the agent can use. Pass both client-side tools
+	// (implement Tool.Execute) and provider-native tools (e.g. &aisdk.WebSearch{})
+	// in the same slice — the agent splits them automatically.
+	Tools      []Tool
+	MaxSteps   int
+	Temperature float64
+	MaxTokens  int
+	Timeout    time.Duration
+	Middleware []Middleware
 }
 
 // BaseAgent provides the default agent implementation.
@@ -220,14 +223,19 @@ func (a *BaseAgent) Stream(ctx context.Context, prompt string, opts ...PromptOpt
 	// Build messages
 	messages := a.buildMessages(p)
 
+	clientTools, builtinTools := splitTools(a.config.Tools)
+
 	req := &TextRequest{
 		Model:    modelName,
 		System:   a.config.Instructions,
 		Messages: messages,
 	}
 
-	if len(a.config.Tools) > 0 {
-		req.Tools = ToolsToDefinitions(a.config.Tools)
+	if len(clientTools) > 0 {
+		req.Tools = ToolsToDefinitions(clientTools)
+	}
+	if len(builtinTools) > 0 {
+		req.BuiltinTools = builtinTools
 	}
 
 	a.applyOptions(req, o)
@@ -344,6 +352,8 @@ func (a *BaseAgent) executePrompt(ctx context.Context, textModel TextModel, prov
 		maxSteps = 1
 	}
 
+	clientTools, builtinTools := splitTools(a.config.Tools)
+
 	for step := 0; step < maxSteps; step++ {
 		req := &TextRequest{
 			Model:    modelName,
@@ -351,8 +361,11 @@ func (a *BaseAgent) executePrompt(ctx context.Context, textModel TextModel, prov
 			Messages: messages,
 		}
 
-		if len(a.config.Tools) > 0 {
-			req.Tools = ToolsToDefinitions(a.config.Tools)
+		if len(clientTools) > 0 {
+			req.Tools = ToolsToDefinitions(clientTools)
+		}
+		if len(builtinTools) > 0 {
+			req.BuiltinTools = builtinTools
 		}
 
 		a.applyOptions(req, o)
@@ -372,7 +385,7 @@ func (a *BaseAgent) executePrompt(ctx context.Context, textModel TextModel, prov
 		}
 
 		// If no tool calls, we're done
-		if len(result.ToolCalls) == 0 || len(a.config.Tools) == 0 {
+		if len(result.ToolCalls) == 0 || len(clientTools) == 0 {
 			allSteps = append(allSteps, stepData)
 			return &Response{
 				Text:         result.Content,
@@ -393,7 +406,7 @@ func (a *BaseAgent) executePrompt(ctx context.Context, textModel TextModel, prov
 
 		var stepToolResults []ToolResultData
 		for _, tc := range result.ToolCalls {
-			tool, found := FindTool(a.config.Tools, tc.Name)
+			tool, found := FindTool(clientTools, tc.Name)
 			if !found {
 				errMsg := fmt.Sprintf("tool %q not found", tc.Name)
 				messages = append(messages, ToolErrorResult(tc.ID, fmt.Errorf("%s", errMsg)))
@@ -486,6 +499,20 @@ func (a *BaseAgent) findHooks() (AgentHooks, bool) {
 }
 
 // --- Helpers ---
+
+// splitTools separates a mixed Tool slice into client-side tools (have Execute)
+// and provider-native BuiltinTools (e.g. WebSearch). This lets callers put
+// everything in one AgentConfig.Tools list, just like Vercel AI SDK and Laravel.
+func splitTools(tools []Tool) (clientTools []Tool, builtinTools []BuiltinTool) {
+	for _, t := range tools {
+		if bt, ok := t.(BuiltinTool); ok {
+			builtinTools = append(builtinTools, bt)
+		} else {
+			clientTools = append(clientTools, t)
+		}
+	}
+	return
+}
 
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {

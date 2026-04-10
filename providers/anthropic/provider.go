@@ -179,15 +179,44 @@ func (m *textModel) buildRequestBody(req *aisdk.TextRequest, stream bool) map[st
 	body["messages"] = messages
 
 	// Tools
-	if len(req.Tools) > 0 {
-		var tools []map[string]any
-		for _, t := range req.Tools {
-			tools = append(tools, map[string]any{
-				"name":         t.Name,
-				"description":  t.Description,
-				"input_schema": t.Parameters,
-			})
+	var tools []map[string]any
+	for _, t := range req.Tools {
+		tools = append(tools, map[string]any{
+			"name":         t.Name,
+			"description":  t.Description,
+			"input_schema": t.Parameters,
+		})
+	}
+	for _, bt := range req.BuiltinTools {
+		switch v := bt.(type) {
+		case *aisdk.WebSearch:
+			tool := map[string]any{
+				"type": "web_search_20250305",
+				"name": "web_search",
+			}
+			if v.MaxResults > 0 {
+				tool["max_uses"] = v.MaxResults
+			}
+			if len(v.AllowedDomains) > 0 {
+				tool["allowed_domains"] = v.AllowedDomains
+			}
+			if v.UserLocation != nil {
+				loc := map[string]any{"type": "approximate"}
+				if v.UserLocation.Country != "" {
+					loc["country"] = v.UserLocation.Country
+				}
+				if v.UserLocation.City != "" {
+					loc["city"] = v.UserLocation.City
+				}
+				if v.UserLocation.Region != "" {
+					loc["region"] = v.UserLocation.Region
+				}
+				tool["user_location"] = loc
+			}
+			tools = append(tools, tool)
 		}
+	}
+	if len(tools) > 0 {
 		body["tools"] = tools
 	}
 
