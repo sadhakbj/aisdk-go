@@ -20,23 +20,29 @@ type WeatherAssistant struct {
 }
 
 func NewWeatherAssistant() *WeatherAssistant {
-	return &WeatherAssistant{
-		BaseAgent: aisdk.NewBaseAgent(aisdk.AgentConfig{
-			Model:        "fast",
-			Instructions: "You are a helpful weather assistant. Use the get_weather tool to look up weather. Be concise.",
-			Tools:        []aisdk.Tool{&WeatherTool{}},
-			MaxSteps:     5,
-			Temperature:  0.7,
-			Timeout:      30 * time.Second,
-			Middleware:    []aisdk.Middleware{loggingMiddleware},
-		}),
-	}
+	w := &WeatherAssistant{}
+	w.BaseAgent = aisdk.NewBaseAgent(aisdk.AgentConfig{
+		Model:        "fast",
+		Instructions: "You are a helpful weather assistant. Use the get_weather tool to look up weather. Be concise.",
+		Tools:        []aisdk.Tool{&WeatherTool{}},
+		MaxSteps:     5,
+		Temperature:  0.7,
+		Timeout:      30 * time.Second,
+		Middleware:   []aisdk.Middleware{loggingMiddleware},
+		// Hooks: embedding BaseAgent means BeforePrompt on *WeatherAssistant is not auto-discovered;
+		// set AgentConfig.Hooks to the value that implements aisdk.AgentHooks.
+		Hooks: w,
+	})
+	return w
 }
 
 // BeforePrompt injects context before every prompt.
 func (w *WeatherAssistant) BeforePrompt(ctx context.Context, p *aisdk.Prompt) {
 	p.Prepend(aisdk.System(fmt.Sprintf("Current time: %s", time.Now().Format(time.RFC1123))))
 }
+
+// AfterPrompt satisfies aisdk.AgentHooks (optional logging hook).
+func (*WeatherAssistant) AfterPrompt(context.Context, *aisdk.Response) {}
 
 // --- Define a tool ---
 
