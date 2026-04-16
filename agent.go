@@ -40,6 +40,10 @@ type AgentConfig struct {
 	MaxTokens  int
 	Timeout    time.Duration
 	Middleware []Middleware
+	// Hooks receives BeforePrompt / AfterPrompt. Use this when you embed BaseAgent
+	// in another struct: methods on the outer type are not discovered automatically,
+	// so set Hooks instead of relying on embedding for AgentHooks.
+	Hooks AgentHooks
 }
 
 // BaseAgent provides the default agent implementation.
@@ -490,11 +494,11 @@ func (a *BaseAgent) storeConversation(ctx context.Context, prompt string, resp *
 }
 
 func (a *BaseAgent) findHooks() (AgentHooks, bool) {
-	// The concrete agent type (embedding BaseAgent) may implement AgentHooks.
-	// Since Go doesn't have self-referential generics, we rely on the fact
-	// that the concrete type's methods will be called directly.
-	// This method is a no-op placeholder; hooks are called by the concrete type's
-	// Prompt/Stream methods if they override them. For BaseAgent alone, no hooks.
+	if a.config.Hooks != nil {
+		return a.config.Hooks, true
+	}
+	// Embedding BaseAgent in another struct does not let us recover the outer
+	// type here; set AgentConfig.Hooks for lifecycle callbacks.
 	return nil, false
 }
 
