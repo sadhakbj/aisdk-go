@@ -240,34 +240,6 @@ func (a *BaseAgent) Stream(ctx context.Context, prompt string, opts ...PromptOpt
 		hooks.BeforePrompt(ctx, p)
 	}
 
-<<<<<<< Updated upstream
-	// Build messages
-	messages := a.buildMessages(p)
-
-	req := &TextRequest{
-		Model:    modelName,
-		System:   a.config.Instructions,
-		Messages: messages,
-	}
-
-	if len(a.config.Tools) > 0 {
-		req.Tools = ToolsToDefinitions(a.config.Tools)
-		req.BuiltinTools = splitBuiltins(a.config.Tools)
-	}
-
-	a.applyOptions(req, o)
-
-	result, err := textModel.Stream(ctx, req)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-
-	// Wrap the raw events with provider/model info. cancel runs after the
-	// underlying stream is fully drained so the timeout context is released.
-	wrappedCh := make(chan StreamEvent)
-=======
-	clientTools, builtinTools := splitTools(a.config.Tools)
 	maxSteps := a.config.MaxSteps
 	if maxSteps <= 0 {
 		maxSteps = 1
@@ -275,7 +247,6 @@ func (a *BaseAgent) Stream(ctx context.Context, prompt string, opts ...PromptOpt
 
 	wrappedCh := make(chan StreamEvent, 8)
 
->>>>>>> Stashed changes
 	go func() {
 		defer cancel()
 		defer close(wrappedCh)
@@ -290,11 +261,9 @@ func (a *BaseAgent) Stream(ctx context.Context, prompt string, opts ...PromptOpt
 				System:   a.config.Instructions,
 				Messages: messages,
 			}
-			if len(clientTools) > 0 {
-				req.Tools = ToolsToDefinitions(clientTools)
-			}
-			if len(builtinTools) > 0 {
-				req.BuiltinTools = builtinTools
+			if len(a.config.Tools) > 0 {
+				req.Tools = ToolsToDefinitions(a.config.Tools)
+				req.BuiltinTools = splitBuiltins(a.config.Tools)
 			}
 			a.applyOptions(req, o)
 
@@ -328,12 +297,12 @@ func (a *BaseAgent) Stream(ctx context.Context, prompt string, opts ...PromptOpt
 				}
 			}
 
-			// No client tools to execute, or model is done → finalize.
+			// No tools to execute, or model is done → finalize.
 			if endEvent == nil {
 				wrappedCh <- &StreamEnd{FinishReason: FinishUnknown}
 				return
 			}
-			if len(pendingCalls) == 0 || len(clientTools) == 0 || endEvent.FinishReason != FinishToolCalls {
+			if len(pendingCalls) == 0 || endEvent.FinishReason != FinishToolCalls {
 				wrappedCh <- endEvent
 				return
 			}
@@ -342,7 +311,7 @@ func (a *BaseAgent) Stream(ctx context.Context, prompt string, opts ...PromptOpt
 			// to messages so the next turn can read them.
 			messages = append(messages, AssistantWithToolCalls("", pendingCalls...))
 			for _, tc := range pendingCalls {
-				tool, found := FindTool(clientTools, tc.Name)
+				tool, found := FindExecutable(a.config.Tools, tc.Name)
 				if !found {
 					errMsg := fmt.Sprintf("tool %q not found", tc.Name)
 					messages = append(messages, ToolErrorResult(tc.ID, fmt.Errorf("%s", errMsg)))
