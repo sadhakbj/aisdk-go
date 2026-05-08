@@ -27,7 +27,7 @@ func TestMiddlewarePipeline(t *testing.T) {
 		return &Response{Text: "OK"}, nil
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	resp, err := runMiddleware(ctx, &Prompt{Text: "test"}, []Middleware{mw1, mw2}, handler)
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +53,7 @@ func TestMiddlewarePipelineEmpty(t *testing.T) {
 		return &Response{Text: "direct"}, nil
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	resp, err := runMiddleware(ctx, &Prompt{Text: "test"}, nil, handler)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestMiddlewareModifiesPrompt(t *testing.T) {
 		return &Response{Text: "OK"}, nil
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err := runMiddleware(ctx, &Prompt{Text: "test"}, []Middleware{mw}, handler)
 	if err != nil {
 		t.Fatal(err)

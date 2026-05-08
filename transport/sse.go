@@ -22,7 +22,7 @@ func SSEHandler(agent aisdk.Agent) http.Handler {
 
 		var body struct {
 			Prompt   string         `json:"prompt"`
-			Messages []aisdk.Message `json:"messages,omitempty"`
+			Messages []aisdk.Message `json:"messages,omitzero"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -77,7 +77,7 @@ func SSEHandlerWithApp(app *aisdk.App, model string) http.Handler {
 
 		var body struct {
 			Prompt   string         `json:"prompt"`
-			Messages []aisdk.Message `json:"messages,omitempty"`
+			Messages []aisdk.Message `json:"messages,omitzero"`
 			System   string         `json:"system,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -170,7 +170,7 @@ func marshalEvent(event aisdk.StreamEvent) string {
 func readPromptFromRequest(ctx context.Context, r io.Reader) (string, []aisdk.Message, error) {
 	var body struct {
 		Prompt   string         `json:"prompt"`
-		Messages []aisdk.Message `json:"messages,omitempty"`
+		Messages []aisdk.Message `json:"messages,omitzero"`
 	}
 	if err := json.NewDecoder(r).Decode(&body); err != nil {
 		return "", nil, err

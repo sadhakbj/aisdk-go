@@ -6,7 +6,7 @@
 // Provider behaviour:
 //
 //	Anthropic — any Claude model; model decides when to search (conditional).
-//	OpenAI    — model is auto-remapped to gpt-4o-search-preview; always searches.
+//	OpenAI    — uses the Responses API (/v1/responses) with your model + web_search.
 //
 // Switch providers by changing Default in examples/config/ai.go.
 //
@@ -15,8 +15,8 @@
 //	ANTHROPIC_API_KEY=sk-ant-...
 //	OPENAI_API_KEY=sk-...
 //
-// Note: the auto-remapped model comment below is outdated — OpenAI now uses
-// the Responses API (/v1/responses) which works with standard models (gpt-4o).
+// OpenAI uses the Responses API (/v1/responses) with the same tier aliases as chat
+// (default / smart / fast map to the model IDs in providers/openai).
 package main
 
 import (

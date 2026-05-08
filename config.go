@@ -7,9 +7,8 @@ import (
 )
 
 // Config is the top-level configuration for the SDK.
-// This is the Go equivalent of Laravel's config/ai.php.
 //
-// Like Laravel, you only configure credentials and connection info.
+// You typically configure credentials and connection info only.
 // Model names are defined by the providers themselves:
 //
 //	aisdk.Configure(&aisdk.Config{
@@ -21,10 +20,9 @@ import (
 //	})
 //
 // Then use built-in aliases like "smart", "fast", "default" — the provider
-// knows which model each tier maps to (like Laravel's smartestTextModel()).
+// knows which model each tier maps to.
 type Config struct {
-	// Providers maps provider names to their configuration.
-	// Like Laravel's config/ai.php 'providers' array — just credentials.
+	// Providers maps provider names to their configuration (typically API keys and base URLs).
 	Providers map[string]ProviderConfig
 
 	// Default is the name of the default provider.
@@ -36,7 +34,7 @@ type Config struct {
 	//
 	// Example:
 	//   "reasoning": "openai/o1"
-	//   "code":      "anthropic/claude-sonnet-4-20250514"
+	//   "code":      "anthropic/claude-sonnet-4-6"
 	Models map[string]string
 
 	// ConversationStore is the store for persisting conversations.
@@ -89,7 +87,7 @@ var (
 // Call this once at startup (typically from config/ai.go's init function),
 // then use package-level functions like GenerateText(), StreamText(), etc.
 //
-// This is the Go equivalent of Laravel's config/ai.php being loaded at boot.
+// Call this once at process startup so package-level helpers use this app.
 //
 //	func init() {
 //	    aisdk.Configure(&aisdk.Config{
@@ -228,7 +226,6 @@ func (a *App) DefaultProvider() (Provider, error) {
 }
 
 // Built-in model tier aliases, resolved from the provider itself.
-// Like Laravel's defaultTextModel(), smartestTextModel(), cheapestTextModel().
 const (
 	ModelDefault = "default" // Provider's default model
 	ModelSmart   = "smart"   // Provider's most capable model
@@ -249,7 +246,7 @@ func isBuiltinAlias(model string) bool {
 //  4. "fast"            → default provider's fast model (from Provider.FastModel())
 //  5. "default"         → default provider's default model (from Provider.DefaultModel())
 //  6. Custom aliases    → resolved from Config.Models (optional user overrides)
-//  7. "gpt-4o"          → default provider + literal model name
+//  7. "gpt-5.4"         → default provider + literal model name
 func (a *App) ResolveModel(model string) (providerName string, modelName string, err error) {
 	// 1. Check user-defined aliases first (optional overrides)
 	if a.config.Models != nil {

@@ -44,17 +44,14 @@ func NewProvider(config *Config) *Provider {
 
 func (p *Provider) ID() string { return "openai" }
 
-// DefaultModel returns the default OpenAI model.
-// Like Laravel's defaultTextModel() → 'gpt-4o'.
+// DefaultModel returns the default OpenAI model (default: gpt-5.4).
 func (p *Provider) DefaultModel() string { return p.config.defaultModel() }
 
-// SmartModel returns the most capable OpenAI model.
-// Like Laravel's smartestTextModel() → 'gpt-4o'.
-func (p *Provider) SmartModel() string { return "gpt-4o" }
+// SmartModel returns the most capable OpenAI model (gpt-5.4-pro).
+func (p *Provider) SmartModel() string { return "gpt-5.4-pro" }
 
-// FastModel returns the cheapest/fastest OpenAI model.
-// Like Laravel's cheapestTextModel() → 'gpt-4o-mini'.
-func (p *Provider) FastModel() string { return "gpt-4o-mini" }
+// FastModel returns the cheapest/fastest OpenAI model (gpt-5.4-nano).
+func (p *Provider) FastModel() string { return "gpt-5.4-nano" }
 
 func (p *Provider) TextModel(model string) aisdk.TextModel {
 	return &textModel{provider: p, model: model}
@@ -239,7 +236,7 @@ func (m *textModel) buildRequestBody(req *aisdk.TextRequest, stream bool) map[st
 // --- Responses API (used for WebSearch) ---
 
 // generateWithResponses calls POST /v1/responses with the built-in web_search tool.
-// The Responses API works with standard models (gpt-4o, gpt-4o-mini) and lets
+// The Responses API works with the configured model and lets
 // the model decide when to search, unlike Chat Completions + web_search_options.
 func (m *textModel) generateWithResponses(ctx context.Context, req *aisdk.TextRequest) (*aisdk.TextResult, error) {
 	body := m.buildResponsesBody(req)

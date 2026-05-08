@@ -14,7 +14,7 @@ func main() {
 	ctx := context.Background()
 
 	// "smart" is a built-in alias — resolved from the provider itself.
-	// OpenAI knows: smart → gpt-4o, fast → gpt-4o-mini
+	// OpenAI maps "smart" / "fast" to gpt-5.4-pro / gpt-5.4-nano (see providers/openai).
 	result, err := aisdk.GenerateText(ctx, aisdk.TextParams{
 		Model:  "smart",
 		Prompt: "Explain goroutines in one paragraph.",
@@ -30,7 +30,7 @@ func main() {
 		result.Usage.TotalTokens,
 	)
 
-	// // "fast" uses the cheapest model (gpt-4o-mini for OpenAI)
+	// // "fast" uses the cheapest model (gpt-5.4-nano for OpenAI)
 	// result, err = aisdk.GenerateText(ctx, aisdk.TextParams{
 	// 	Model:  "fast",
 	// 	System: "You are a helpful assistant that explains things simply.",

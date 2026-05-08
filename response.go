@@ -31,21 +31,21 @@ func (u Usage) Add(other Usage) Usage {
 // Step represents one step in a multi-step agent execution.
 type Step struct {
 	Text         string           `json:"text,omitempty"`
-	ToolCalls    []ToolCallData   `json:"tool_calls,omitempty"`
-	ToolResults  []ToolResultData `json:"tool_results,omitempty"`
+	ToolCalls    []ToolCallData   `json:"tool_calls,omitzero"`
+	ToolResults  []ToolResultData `json:"tool_results,omitzero"`
 	FinishReason FinishReason     `json:"finish_reason"`
-	Usage        Usage            `json:"usage"`
+	Usage        Usage            `json:"usage,omitzero"`
 }
 
 // Response is the result of a Prompt() call.
 type Response struct {
 	Text           string           `json:"text"`
-	Messages       []Message        `json:"messages,omitempty"`
+	Messages       []Message        `json:"messages,omitzero"`
 	FinishReason   FinishReason     `json:"finish_reason"`
-	Usage          Usage            `json:"usage"`
-	Steps          []Step           `json:"steps,omitempty"`
-	ToolCalls      []ToolCallData   `json:"tool_calls,omitempty"`
-	ToolResults    []ToolResultData `json:"tool_results,omitempty"`
+	Usage          Usage            `json:"usage,omitzero"`
+	Steps          []Step           `json:"steps,omitzero"`
+	ToolCalls      []ToolCallData   `json:"tool_calls,omitzero"`
+	ToolResults    []ToolResultData `json:"tool_results,omitzero"`
 	Provider       string           `json:"provider"`
 	Model          string           `json:"model"`
 	ConversationID string           `json:"conversation_id,omitempty"`
@@ -56,7 +56,7 @@ type ObjectResponse[T any] struct {
 	Object       T            `json:"object"`
 	Text         string       `json:"text"`
 	FinishReason FinishReason `json:"finish_reason"`
-	Usage        Usage        `json:"usage"`
+	Usage        Usage        `json:"usage,omitzero"`
 	Provider     string       `json:"provider"`
 	Model        string       `json:"model"`
 }

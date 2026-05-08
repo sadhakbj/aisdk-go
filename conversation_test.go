@@ -1,12 +1,11 @@
 package aisdk
 
 import (
-	"context"
 	"testing"
 )
 
 func TestInMemoryStore(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := NewInMemoryStore()
 
 	// Store a conversation

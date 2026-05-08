@@ -53,7 +53,7 @@ func printUsage() {
 	fmt.Println(`aisdk - AI SDK for Go scaffolding tool
 
 Usage:
-  aisdk init                    Generate config/ai.go (like Laravel's vendor:publish)
+  aisdk init                    Generate config/ai.go for your module
   aisdk init --dir <path>       Generate config in a custom directory
   aisdk new agent <Name>        Scaffold a new agent file in agents/
 
@@ -172,7 +172,7 @@ import (
 
 func init() {
 	aisdk.Configure(&aisdk.Config{
-		// Providers — just credentials, like Laravel's config/ai.php.
+		// Providers — credentials (and optional base URL) only.
 		// Each provider defines its own models internally:
 		//   "smart"   → provider's most capable model
 		//   "fast"    → provider's cheapest/fastest model
@@ -263,7 +263,7 @@ func detectModuleName() string {
 		return strings.TrimSpace(string(out))
 	}
 
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "module ") {
 			return strings.TrimPrefix(line, "module ")

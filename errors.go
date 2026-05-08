@@ -45,7 +45,7 @@ func (e *AIError) Unwrap() error {
 // RateLimitedError indicates the provider returned a rate limit response.
 type RateLimitedError struct {
 	AIError
-	RetryAfter time.Duration `json:"retry_after,omitempty"`
+	RetryAfter time.Duration `json:"retry_after,omitzero"`
 }
 
 func (e *RateLimitedError) IsFailoverable() bool { return true }
@@ -103,7 +103,7 @@ func NewToolError(toolName string, cause error) *ToolError {
 // ProviderError indicates a generic provider-side error.
 type ProviderError struct {
 	AIError
-	StatusCode int `json:"status_code,omitempty"`
+	StatusCode int `json:"status_code,omitzero"`
 }
 
 // NewProviderError creates a new ProviderError.

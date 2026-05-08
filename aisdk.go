@@ -1,5 +1,5 @@
-// Package aisdk provides a clean, idiomatic Go AI SDK inspired by
-// Laravel AI SDK and Vercel AI SDK.
+// Package aisdk provides a clean, idiomatic Go AI SDK with a configure-once workflow
+// and provider-local model tiers.
 //
 // Configure once, use everywhere:
 //
@@ -60,7 +60,6 @@ func StreamText(ctx context.Context, params TextParams) (*Stream, error) {
 }
 
 // Quick creates an inline agent for one-off usage using the default App.
-// Like Laravel's agent() helper function.
 //
 //	result, err := aisdk.Quick(aisdk.AgentConfig{
 //	    Instructions: "You are a code reviewer.",
