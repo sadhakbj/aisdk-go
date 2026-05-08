@@ -16,7 +16,7 @@ func main() {
 	// "smart" is a built-in alias — resolved from the provider itself.
 	// OpenAI maps "smart" / "fast" to gpt-5.4-pro / gpt-5.4-nano (see providers/openai).
 	result, err := aisdk.GenerateText(ctx, aisdk.TextParams{
-		Model:  "smart",
+		Model:  "fast",
 		Prompt: "Explain goroutines in one paragraph.",
 	})
 	if err != nil {

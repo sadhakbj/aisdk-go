@@ -173,9 +173,12 @@ result, _ := coach.Prompt(ctx, "How are my numbers this quarter?")
 ### Inline Agent
 
 ```go
-result, _ := aisdk.Quick(aisdk.AgentConfig{
+agent, err := aisdk.Quick(aisdk.AgentConfig{
     Instructions: "You are a code reviewer.",
-}).Prompt(ctx, "Review this function...")
+})
+if err != nil { return err }
+
+result, err := agent.Prompt(ctx, "Review this function...")
 ```
 
 ## Tools
@@ -199,7 +202,7 @@ func (t *WeatherTool) Execute(ctx context.Context, args json.RawMessage) (any, e
 
 ## Provider-Native Web Search
 
-`aisdk.WebSearch` gives agents real-time web access by delegating to the AI provider's own search infrastructure — no third-party API key needed. Add it to `Tools` alongside any other tools.
+`aisdk.WebSearch` gives agents real-time web access by delegating to the AI provider's own search infrastructure — no third-party API key needed. Add it to the same `Tools` slice as your client-side tools.
 
 ```go
 agent := aisdk.NewBaseAgent(aisdk.AgentConfig{
@@ -242,12 +245,12 @@ Switch providers in `config/ai.go` — the agent code stays the same:
 
 ### Mixing with client-side tools
 
-`WebSearch` goes in the same `Tools` slice as your own tools — the SDK splits them automatically:
+`Tools` is a single slice. The agent inspects each entry: anything implementing `Executable` is invoked locally via `Execute`; anything implementing `BuiltinTool` (like `WebSearch`) is forwarded to the provider as a native capability.
 
 ```go
 Tools: []aisdk.Tool{
-    &aisdk.WebSearch{},   // provider handles this server-side
-    &WeatherTool{},       // your code handles this via Execute()
+    &aisdk.WebSearch{}, // provider handles this server-side
+    &WeatherTool{},     // your code handles this via Execute()
     &CalendarTool{},
 },
 ```

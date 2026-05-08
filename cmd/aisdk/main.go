@@ -222,7 +222,7 @@ func New%s() *%s {
 			MaxSteps:     5,
 			Temperature:  0.7,
 			Timeout:      60 * time.Second,
-			// Tools:     []aisdk.Tool{},
+			// Tools:      []aisdk.Tool{}, // client-side (Executable) and provider-native (BuiltinTool, e.g. &aisdk.WebSearch{}) in one slice
 			// Middleware: []aisdk.Middleware{},
 		}),
 	}

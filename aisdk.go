@@ -27,10 +27,13 @@ import (
 
 // TextParams holds parameters for GenerateText and StreamText calls.
 type TextParams struct {
-	Model       string
-	System      string
-	Prompt      string
-	Messages    []Message
+	Model    string
+	System   string
+	Prompt   string
+	Messages []Message
+	// Tools accepts both client-side tools (Executable) and provider-native
+	// tools (BuiltinTool, e.g. &aisdk.WebSearch{}) in a single slice. Each is
+	// dispatched to the correct request field automatically.
 	Tools       []Tool
 	Temperature *float64
 	MaxTokens   *int
@@ -51,21 +54,36 @@ type ObjectParams struct {
 // GenerateText performs a one-shot text generation using the default App.
 // Configure the default App with Configure() or import your config package.
 func GenerateText(ctx context.Context, params TextParams) (*Response, error) {
-	return DefaultApp().GenerateText(ctx, params)
+	app, err := DefaultApp()
+	if err != nil {
+		return nil, err
+	}
+	return app.GenerateText(ctx, params)
 }
 
 // StreamText performs a streaming text generation using the default App.
 func StreamText(ctx context.Context, params TextParams) (*Stream, error) {
-	return DefaultApp().StreamText(ctx, params)
+	app, err := DefaultApp()
+	if err != nil {
+		return nil, err
+	}
+	return app.StreamText(ctx, params)
 }
 
 // Quick creates an inline agent for one-off usage using the default App.
+// Returns ErrNotConfigured if Configure has not been called.
 //
-//	result, err := aisdk.Quick(aisdk.AgentConfig{
+//	agent, err := aisdk.Quick(aisdk.AgentConfig{
 //	    Instructions: "You are a code reviewer.",
-//	}).Prompt(ctx, "Review this code...")
-func Quick(config AgentConfig) *BaseAgent {
-	return QuickWithApp(DefaultApp(), config)
+//	})
+//	if err != nil { return err }
+//	result, err := agent.Prompt(ctx, "Review this code...")
+func Quick(config AgentConfig) (*BaseAgent, error) {
+	app, err := DefaultApp()
+	if err != nil {
+		return nil, err
+	}
+	return QuickWithApp(app, config), nil
 }
 
 // --- App-level methods (for explicit App usage) ---
@@ -93,6 +111,7 @@ func (a *App) GenerateText(ctx context.Context, params TextParams) (*Response, e
 
 	if len(params.Tools) > 0 {
 		req.Tools = ToolsToDefinitions(params.Tools)
+		req.BuiltinTools = splitBuiltins(params.Tools)
 	}
 
 	result, err := withRetry(ctx, a.effectiveRetry(), func() (*TextResult, error) {
@@ -134,6 +153,7 @@ func (a *App) StreamText(ctx context.Context, params TextParams) (*Stream, error
 
 	if len(params.Tools) > 0 {
 		req.Tools = ToolsToDefinitions(params.Tools)
+		req.BuiltinTools = splitBuiltins(params.Tools)
 	}
 
 	result, err := withRetry(ctx, a.effectiveRetry(), func() (*TextStreamResult, error) {
@@ -160,7 +180,11 @@ func (a *App) StreamText(ctx context.Context, params TextParams) (*Stream, error
 // GenerateObject performs a text generation and parses the output into a typed struct.
 // Uses the default App. For explicit App usage, use GenerateObjectWithApp.
 func GenerateObject[T any](ctx context.Context, params ObjectParams) (*ObjectResponse[T], error) {
-	return GenerateObjectWithApp[T](ctx, DefaultApp(), params)
+	app, err := DefaultApp()
+	if err != nil {
+		return nil, err
+	}
+	return GenerateObjectWithApp[T](ctx, app, params)
 }
 
 // GenerateObjectWithApp performs structured output generation on a specific App.

@@ -8,10 +8,18 @@ import (
 	"strings"
 )
 
-// Tool is the interface for defining callable tools that agents can use.
+// Tool is the marker interface satisfied by anything that can be added to
+// AgentConfig.Tools. Implement Executable for client-side tools or
+// BuiltinTool for provider-native ones.
 type Tool interface {
 	// Name returns the tool's unique name.
 	Name() string
+}
+
+// Executable is the interface for client-side tools. The agent invokes
+// Execute locally when the model emits a matching tool_call.
+type Executable interface {
+	Tool
 
 	// Description returns a human-readable description of what the tool does.
 	Description() string
@@ -24,8 +32,8 @@ type Tool interface {
 	Execute(ctx context.Context, args json.RawMessage) (any, error)
 }
 
-// ToolToDefinition converts a Tool into a ToolDef for sending to providers.
-func ToolToDefinition(t Tool) ToolDef {
+// ToolToDefinition converts an Executable into a ToolDef for sending to providers.
+func ToolToDefinition(t Executable) ToolDef {
 	return ToolDef{
 		Name:        t.Name(),
 		Description: t.Description(),
@@ -33,23 +41,48 @@ func ToolToDefinition(t Tool) ToolDef {
 	}
 }
 
-// ToolsToDefinitions converts a slice of Tools to ToolDefs.
+// ToolsToDefinitions converts the client-side (Executable) tools in the slice
+// into ToolDefs, skipping any BuiltinTools.
 func ToolsToDefinitions(tools []Tool) []ToolDef {
-	defs := make([]ToolDef, len(tools))
-	for i, t := range tools {
-		defs[i] = ToolToDefinition(t)
+	defs := make([]ToolDef, 0, len(tools))
+	for _, t := range tools {
+		if _, isBuiltin := t.(BuiltinTool); isBuiltin {
+			continue
+		}
+		if e, ok := t.(Executable); ok {
+			defs = append(defs, ToolToDefinition(e))
+		}
 	}
 	return defs
 }
 
-// FindTool looks up a tool by name from a slice.
-func FindTool(tools []Tool, name string) (Tool, bool) {
+// FindExecutable looks up a client-side tool by name. It only matches tools
+// that satisfy Executable — BuiltinTools are skipped because they are not
+// invoked locally.
+func FindExecutable(tools []Tool, name string) (Executable, bool) {
 	for _, t := range tools {
-		if t.Name() == name {
-			return t, true
+		if t.Name() != name {
+			continue
+		}
+		if _, isBuiltin := t.(BuiltinTool); isBuiltin {
+			continue
+		}
+		if e, ok := t.(Executable); ok {
+			return e, true
 		}
 	}
 	return nil, false
+}
+
+// splitBuiltins returns the BuiltinTools embedded in a mixed Tools slice.
+func splitBuiltins(tools []Tool) []BuiltinTool {
+	var out []BuiltinTool
+	for _, t := range tools {
+		if bt, ok := t.(BuiltinTool); ok {
+			out = append(out, bt)
+		}
+	}
+	return out
 }
 
 // --- JSON Schema generation from Go struct tags ---

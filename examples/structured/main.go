@@ -42,7 +42,7 @@ func main() {
 
 	fmt.Println("=== Recipe Generation ===")
 	recipe, err := aisdk.GenerateObject[Recipe](ctx, aisdk.ObjectParams{
-		Model:  "smart",
+		Model:  "default",
 		Prompt: "Give me a simple pasta carbonara recipe.",
 	})
 	if err != nil {
@@ -61,10 +61,13 @@ func main() {
 	// --- Structured output with PromptObject[T] from an agent ---
 
 	fmt.Println("\n=== Code Review ===")
-	reviewer := aisdk.Quick(aisdk.AgentConfig{
-		Model:        "smart",
+	reviewer, err := aisdk.Quick(aisdk.AgentConfig{
+		Model:        "default",
 		Instructions: "You are a senior Go developer reviewing code.",
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	code := `
 func getData(url string) ([]byte, error) {
