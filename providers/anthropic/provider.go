@@ -44,17 +44,14 @@ func NewProvider(config *Config) *Provider {
 
 func (p *Provider) ID() string { return "anthropic" }
 
-// DefaultModel returns the default Anthropic model.
-// Like Laravel's defaultTextModel() → 'claude-sonnet-4-20250514'.
+// DefaultModel returns the default Anthropic model (default: claude-sonnet-4-6).
 func (p *Provider) DefaultModel() string { return p.config.defaultModel() }
 
-// SmartModel returns the most capable Anthropic model.
-// Like Laravel's smartestTextModel() → 'claude-sonnet-4-20250514'.
-func (p *Provider) SmartModel() string { return "claude-sonnet-4-20250514" }
+// SmartModel returns the most capable Anthropic model (claude-opus-4-7).
+func (p *Provider) SmartModel() string { return "claude-opus-4-7" }
 
-// FastModel returns the cheapest/fastest Anthropic model.
-// Like Laravel's cheapestTextModel() → 'claude-haiku-3-5-20241022'.
-func (p *Provider) FastModel() string { return "claude-haiku-3-5-20241022" }
+// FastModel returns the cheapest/fastest Anthropic model (claude-haiku-4-5-20251001).
+func (p *Provider) FastModel() string { return "claude-haiku-4-5-20251001" }
 
 func (p *Provider) TextModel(model string) aisdk.TextModel {
 	return &textModel{provider: p, model: model}

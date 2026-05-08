@@ -1,7 +1,6 @@
 package aisdk_test
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -13,7 +12,7 @@ func TestGenerateText(t *testing.T) {
 	fake := aisdktest.NewFakeApp(t)
 	fake.FakeText(aisdktest.Response("Hello, world!"))
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Use package-level function -- no app needed!
 	result, err := aisdk.GenerateText(ctx, aisdk.TextParams{
@@ -45,7 +44,7 @@ func TestStreamText(t *testing.T) {
 		&aisdk.StreamEnd{FinishReason: aisdk.FinishStop, Usage: aisdk.Usage{TotalTokens: 10}},
 	))
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	stream, err := aisdk.StreamText(ctx, aisdk.TextParams{
 		Model:  "fake-model",
@@ -84,7 +83,7 @@ func TestGenerateObject(t *testing.T) {
 		Ingredients: []string{"noodles", "sauce"},
 	}))
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Uses package-level function with default app
 	result, err := aisdk.GenerateObject[Recipe](ctx, aisdk.ObjectParams{
@@ -108,7 +107,7 @@ func TestQuickAgent(t *testing.T) {
 	fake := aisdktest.NewFakeApp(t)
 	fake.FakeText(aisdktest.Response("I found a bug!"))
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Quick without app -- uses global default
 	result, err := aisdk.Quick(aisdk.AgentConfig{
@@ -131,7 +130,7 @@ func TestPreventStrayPrompts(t *testing.T) {
 	fake.FakeText(aisdktest.Response("OK"))
 	fake.PreventStrayPrompts(t)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	result, err := aisdk.GenerateText(ctx, aisdk.TextParams{
 		Model:  "fake-model",
@@ -150,7 +149,7 @@ func TestAssertNeverPrompted(t *testing.T) {
 	fake := aisdktest.NewFakeApp(t)
 	fake.FakeText(aisdktest.Response("OK"))
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, _ = aisdk.GenerateText(ctx, aisdk.TextParams{
 		Model:  "fake-model",
@@ -183,7 +182,7 @@ func TestSequentialFakeResponses(t *testing.T) {
 		aisdktest.Response("Third"),
 	)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	r1, _ := aisdk.GenerateText(ctx, aisdk.TextParams{Model: "m", Prompt: "1"})
 	r2, _ := aisdk.GenerateText(ctx, aisdk.TextParams{Model: "m", Prompt: "2"})
@@ -212,7 +211,7 @@ func TestExplicitApp(t *testing.T) {
 	fake.FakeText(aisdktest.Response("explicit"))
 
 	app := fake.App()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	result, err := app.GenerateText(ctx, aisdk.TextParams{
 		Model:  "fake-model",

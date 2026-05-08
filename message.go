@@ -17,9 +17,9 @@ type Message struct {
 	Role         Role             `json:"role"`
 	Content      string           `json:"content,omitempty"`
 	Name         string           `json:"name,omitempty"`
-	ToolCalls    []ToolCallData   `json:"tool_calls,omitempty"`
+	ToolCalls    []ToolCallData   `json:"tool_calls,omitzero"`
 	ToolCallID   string           `json:"tool_call_id,omitempty"`
-	Attachments  []Attachment     `json:"attachments,omitempty"`
+	Attachments  []Attachment     `json:"attachments,omitzero"`
 }
 
 // ToolCallData represents a tool call made by the assistant.
@@ -34,7 +34,7 @@ type ToolResultData struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Result    any    `json:"result"`
-	IsError   bool   `json:"is_error,omitempty"`
+	IsError   bool   `json:"is_error,omitzero"`
 }
 
 // Attachment represents a file or media attached to a message.
@@ -43,7 +43,7 @@ type Attachment struct {
 	URL      string `json:"url,omitempty"`
 	Path     string `json:"path,omitempty"`
 	MimeType string `json:"mime_type,omitempty"`
-	Data     []byte `json:"data,omitempty"`
+	Data     []byte `json:"data,omitzero"`
 }
 
 // --- Message constructors ---

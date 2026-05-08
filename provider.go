@@ -9,9 +9,8 @@ import (
 // Provider represents an AI provider (OpenAI, Anthropic, etc.).
 // Implement this interface to add a new provider to the SDK.
 //
-// Each provider defines its own model tiers — just like Laravel's
-// defaultTextModel(), smartestTextModel(), and cheapestTextModel().
-// Users never need to configure model names; the provider knows its own models.
+// Each provider defines its own model tiers (default, smart, fast).
+// Callers use aliases such as "default", "smart", and "fast"; the provider maps them to concrete model IDs.
 type Provider interface {
 	// ID returns a unique identifier for this provider (e.g. "openai", "anthropic").
 	ID() string
@@ -20,15 +19,12 @@ type Provider interface {
 	TextModel(model string) TextModel
 
 	// DefaultModel returns the default model name for this provider.
-	// Like Laravel's defaultTextModel().
 	DefaultModel() string
 
 	// SmartModel returns the most capable model for this provider.
-	// Like Laravel's smartestTextModel().
 	SmartModel() string
 
 	// FastModel returns the cheapest/fastest model for this provider.
-	// Like Laravel's cheapestTextModel().
 	FastModel() string
 }
 
@@ -53,12 +49,12 @@ type TextRequest struct {
 	Model          string       `json:"model"`
 	System         string       `json:"system,omitempty"`
 	Messages       []Message    `json:"messages"`
-	Tools          []ToolDef    `json:"tools,omitempty"`
+	Tools          []ToolDef    `json:"tools,omitzero"`
 	BuiltinTools   []BuiltinTool `json:"-"`
 	Temperature    *float64     `json:"temperature,omitempty"`
 	MaxTokens      *int         `json:"max_tokens,omitempty"`
 	TopP           *float64     `json:"top_p,omitempty"`
-	StopSequences  []string     `json:"stop,omitempty"`
+	StopSequences  []string     `json:"stop,omitzero"`
 	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 }
 
@@ -128,15 +124,15 @@ func (w *WebSearch) Execute(_ context.Context, _ json.RawMessage) (any, error) {
 // ResponseFormat controls structured output mode.
 type ResponseFormat struct {
 	Type       string `json:"type"` // "json_object" or "json_schema"
-	JSONSchema any    `json:"json_schema,omitempty"`
+	JSONSchema any    `json:"json_schema,omitzero"`
 }
 
 // TextResult is the raw result from a TextModel.Generate call.
 type TextResult struct {
 	Content      string         `json:"content"`
-	ToolCalls    []ToolCallData `json:"tool_calls,omitempty"`
+	ToolCalls    []ToolCallData `json:"tool_calls,omitzero"`
 	FinishReason FinishReason   `json:"finish_reason"`
-	Usage        Usage          `json:"usage"`
+	Usage        Usage          `json:"usage,omitzero"`
 }
 
 // TextStreamResult holds the channel and metadata for a streaming response.

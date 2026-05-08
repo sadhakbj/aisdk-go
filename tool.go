@@ -106,7 +106,7 @@ func generateObjectSchema(t reflect.Type) map[string]any {
 		// Parse jsonschema tag
 		schemaTag := field.Tag.Get("jsonschema")
 		if schemaTag != "" {
-			for _, part := range strings.Split(schemaTag, ",") {
+			for part := range strings.SplitSeq(schemaTag, ",") {
 				part = strings.TrimSpace(part)
 				switch {
 				case part == "required":

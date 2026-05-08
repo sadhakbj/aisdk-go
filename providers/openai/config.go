@@ -4,7 +4,7 @@ import aisdk "github.com/sadhakbj/aisdk-go"
 
 const (
 	defaultBaseURL = "https://api.openai.com/v1"
-	defaultModel   = "gpt-4o"
+	defaultModel   = "gpt-5.4"
 )
 
 // Config holds OpenAI-specific configuration.
@@ -15,7 +15,7 @@ type Config struct {
 	// BaseURL overrides the API base URL (useful for proxies or compatible APIs).
 	BaseURL string
 
-	// DefaultModel is the default model to use. Defaults to "gpt-4o".
+	// DefaultModel is the default model to use. Defaults to "gpt-5.4".
 	DefaultModel string
 
 	// Organization is the optional OpenAI organization ID.

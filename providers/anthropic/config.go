@@ -4,7 +4,7 @@ import aisdk "github.com/sadhakbj/aisdk-go"
 
 const (
 	defaultBaseURL = "https://api.anthropic.com/v1"
-	defaultModel   = "claude-sonnet-4-20250514"
+	defaultModel   = "claude-sonnet-4-6"
 	apiVersion     = "2023-06-01"
 )
 
@@ -16,7 +16,7 @@ type Config struct {
 	// BaseURL overrides the API base URL.
 	BaseURL string
 
-	// DefaultModel is the default model to use. Defaults to "claude-sonnet-4-20250514".
+	// DefaultModel is the default model to use. Defaults to "claude-sonnet-4-6".
 	DefaultModel string
 }
 

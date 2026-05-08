@@ -8,8 +8,7 @@
 The unified AI SDK for Go — configure once, swap providers freely, test easily.
 
 Stop wiring provider SDKs manually. `aisdk-go` gives Go applications a single, clean interface
-to OpenAI, Anthropic, and more — the same philosophy that [Laravel AI SDK](https://laravel.com/docs/ai)
-brought to PHP, built natively for Go.
+to OpenAI, Anthropic, and more — configure once, swap providers, test with fakes.
 
 ```
 go get github.com/sadhakbj/aisdk-go
@@ -17,8 +16,8 @@ go get github.com/sadhakbj/aisdk-go
 
 ## Features
 
-- **Configure once, use everywhere** — Just credentials, like Laravel's `config/ai.php`
-- **Providers know their models** — `"smart"`, `"fast"` resolved from the provider itself (like Laravel's `smartestTextModel()`)
+- **Configure once, use everywhere** — Typically just credentials in `config/ai.go`
+- **Providers know their models** — `"smart"`, `"fast"`, and `"default"` resolve to each provider's tier IDs
 - **Multi-provider** — OpenAI and Anthropic out of the box, extensible via `Provider` interface
 - **Streaming** — Channel-based streaming with typed events
 - **Structured output** — `GenerateObject[T]()` with generics for compile-time type safety
@@ -35,7 +34,7 @@ go get github.com/sadhakbj/aisdk-go
 
 ### 1. Configure
 
-Create `config/ai.go` — your single source of truth (like Laravel's `config/ai.php`):
+Create `config/ai.go` — your single source of truth:
 
 ```go
 // config/ai.go
@@ -76,7 +75,7 @@ import (
 )
 
 func main() {
-    // "smart" → resolved from the provider (OpenAI → gpt-4o)
+    // "smart" → resolved from the provider (OpenAI → gpt-5.4-pro)
     result, _ := aisdk.GenerateText(context.Background(), aisdk.TextParams{
         Model:  "smart",
         Prompt: "Explain goroutines in one paragraph.",
@@ -87,13 +86,13 @@ func main() {
 
 ## Built-in Model Aliases
 
-Each provider defines its own model tiers — like Laravel's `defaultTextModel()`, `smartestTextModel()`, `cheapestTextModel()`:
+Each provider defines its own model tiers for `"default"`, `"smart"`, and `"fast"`:
 
-| Alias       | OpenAI          | Anthropic                    |
-|-------------|-----------------|------------------------------|
-| `"smart"`   | `gpt-4o`        | `claude-sonnet-4-20250514`   |
-| `"fast"`    | `gpt-4o-mini`   | `claude-haiku-3-5-20241022`  |
-| `"default"` | `gpt-4o`        | `claude-sonnet-4-20250514`   |
+| Alias       | OpenAI           | Anthropic                      |
+|-------------|------------------|--------------------------------|
+| `"smart"`   | `gpt-5.4-pro`    | `claude-opus-4-7`              |
+| `"fast"`    | `gpt-5.4-nano`   | `claude-haiku-4-5-20251001`    |
+| `"default"` | `gpt-5.4`        | `claude-sonnet-4-6`            |
 
 ```go
 // Uses default provider's smart model
@@ -103,7 +102,7 @@ aisdk.GenerateText(ctx, aisdk.TextParams{Model: "smart", Prompt: "..."})
 aisdk.GenerateText(ctx, aisdk.TextParams{Model: "anthropic/fast", Prompt: "..."})
 
 // Or use explicit model names
-aisdk.GenerateText(ctx, aisdk.TextParams{Model: "openai/gpt-4o", Prompt: "..."})
+aisdk.GenerateText(ctx, aisdk.TextParams{Model: "openai/gpt-5.4", Prompt: "..."})
 ```
 
 ## Streaming
@@ -218,7 +217,7 @@ Switch providers in `config/ai.go` — the agent code stays the same:
 
 | Provider | How it works |
 |----------|-------------|
-| **OpenAI** | Uses the [Responses API](https://platform.openai.com/docs/guides/tools-web-search) (`/v1/responses`) with `{"type": "web_search"}`. Model decides when to search. Standard models (`gpt-4o`, `gpt-4o-mini`). |
+| **OpenAI** | Uses the [Responses API](https://platform.openai.com/docs/guides/tools-web-search) (`/v1/responses`) with `{"type": "web_search"}`. Model decides when to search. Uses the same model IDs as your tier aliases (`providers/openai`). |
 | **Anthropic** | Uses `web_search_20250305` built-in tool in the Messages API. Any Claude model. |
 
 ### Options
@@ -335,7 +334,7 @@ func TestCoach(t *testing.T) {
     BaseURL:      "",  // optional, for proxies
     Organization: "",  // optional
 }
-// Built-in: smart → gpt-4o, fast → gpt-4o-mini
+// Built-in: smart → gpt-5.4-pro, fast → gpt-5.4-nano, default → gpt-5.4
 ```
 
 ### Anthropic
@@ -345,7 +344,7 @@ func TestCoach(t *testing.T) {
     APIKey:  os.Getenv("ANTHROPIC_API_KEY"),
     BaseURL: "",  // optional
 }
-// Built-in: smart → claude-sonnet-4-20250514, fast → claude-haiku-3-5-20241022
+// Built-in: smart → claude-opus-4-7, fast → claude-haiku-4-5-20251001, default → claude-sonnet-4-6
 ```
 
 ### Adding a Provider
@@ -361,7 +360,7 @@ aisdk.Configure(&aisdk.Config{
     // ...providers...
     Models: map[string]string{
         "reasoning": "openai/o1",
-        "code":      "anthropic/claude-sonnet-4-20250514",
+        "code":      "anthropic/claude-sonnet-4-6",
     },
 })
 

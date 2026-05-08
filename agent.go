@@ -506,7 +506,7 @@ func (a *BaseAgent) findHooks() (AgentHooks, bool) {
 
 // splitTools separates a mixed Tool slice into client-side tools (have Execute)
 // and provider-native BuiltinTools (e.g. WebSearch). This lets callers put
-// everything in one AgentConfig.Tools list, just like Vercel AI SDK and Laravel.
+// everything in one AgentConfig.Tools list, similar to other multi-capability agent APIs.
 func splitTools(tools []Tool) (clientTools []Tool, builtinTools []BuiltinTool) {
 	for _, t := range tools {
 		if bt, ok := t.(BuiltinTool); ok {
