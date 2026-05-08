@@ -65,7 +65,7 @@ func FindTool(tools []Tool, name string) (Tool, bool) {
 //   - maximum=N       sets maximum for numbers
 func GenerateJSONSchema(v any) map[string]any {
 	if v == nil {
-		return map[string]any{"type": "object", "properties": map[string]any{}}
+		return emptyObjectSchema()
 	}
 
 	t := reflect.TypeOf(v)
@@ -73,15 +73,31 @@ func GenerateJSONSchema(v any) map[string]any {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
-		return map[string]any{"type": "object", "properties": map[string]any{}}
+		return emptyObjectSchema()
 	}
 
 	return generateObjectSchema(t)
 }
 
+// emptyObjectSchema returns a strict-mode-compatible JSON Schema for an
+// argumentless function. OpenAI's Responses API (strict: true) requires
+// every object schema to declare additionalProperties:false and a
+// non-null required array, even when there are no properties.
+func emptyObjectSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"properties":           map[string]any{},
+		"required":             []string{},
+		"additionalProperties": false,
+	}
+}
+
 func generateObjectSchema(t reflect.Type) map[string]any {
 	properties := map[string]any{}
-	var required []string
+	// Initialize as empty slice (not nil) so the JSON marshals to [] rather
+	// than null when the struct has no fields. OpenAI strict mode rejects
+	// "required": null with "None is not of type 'array'".
+	required := []string{}
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
