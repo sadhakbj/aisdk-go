@@ -2,8 +2,13 @@
 //
 // All text generation routes through the modern Responses API
 // (POST /v1/responses). The legacy Chat Completions endpoint is no longer
+<<<<<<< Updated upstream
 // used because the gpt-5.4 family and newer reasoning-tier models are only
 // served by /v1/responses.
+=======
+// used because the gpt-5.4 family and reasoning-tier models (o1/o3/o4) are
+// only served by /v1/responses.
+>>>>>>> Stashed changes
 //
 // Import this package to register the OpenAI provider:
 //
@@ -114,7 +119,10 @@ func (m *textModel) Stream(ctx context.Context, req *aisdk.TextRequest) (*aisdk.
 
 // --- Request body construction ---
 
+<<<<<<< Updated upstream
 // buildBody assembles the JSON payload for POST /v1/responses.
+=======
+>>>>>>> Stashed changes
 func (m *textModel) buildBody(req *aisdk.TextRequest) map[string]any {
 	body := map[string]any{
 		"model": m.model,
@@ -142,7 +150,11 @@ func (m *textModel) buildBody(req *aisdk.TextRequest) map[string]any {
 	}
 
 	if req.ResponseFormat != nil {
+<<<<<<< Updated upstream
 		body["text"] = m.mapResponseFormat(req.ResponseFormat)
+=======
+		body["text"] = mapResponseFormat(req.ResponseFormat)
+>>>>>>> Stashed changes
 	}
 
 	return body
@@ -156,16 +168,22 @@ func (m *textModel) buildBody(req *aisdk.TextRequest) map[string]any {
 //	assistant → {role:"assistant", content:[{type:"output_text", text:...}]}
 //	          + zero or more {type:"function_call", id, call_id, name, arguments}
 //	tool      → {type:"function_call_output", call_id, output:"<string>"}
+<<<<<<< Updated upstream
 //
 // (System prompt is sent separately via the top-level "instructions" field.)
+=======
+>>>>>>> Stashed changes
 func (m *textModel) mapMessages(req *aisdk.TextRequest) []map[string]any {
 	var input []map[string]any
 
 	for _, msg := range req.Messages {
 		switch msg.Role {
 		case aisdk.RoleSystem:
+<<<<<<< Updated upstream
 			// Responses API has a top-level "instructions" field; if a system
 			// message slipped into the slice, fold it in as a system input.
+=======
+>>>>>>> Stashed changes
 			input = append(input, map[string]any{
 				"role":    "system",
 				"content": msg.Content,
@@ -189,11 +207,16 @@ func (m *textModel) mapMessages(req *aisdk.TextRequest) []map[string]any {
 				})
 			}
 			for _, tc := range msg.ToolCalls {
+<<<<<<< Updated upstream
 				item := map[string]any{
+=======
+				input = append(input, map[string]any{
+>>>>>>> Stashed changes
 					"type":      "function_call",
 					"call_id":   tc.ID,
 					"name":      tc.Name,
 					"arguments": string(tc.Arguments),
+<<<<<<< Updated upstream
 				}
 				// Only include the provider-side id when we have it; OpenAI
 				// validates the format ("fc_..."), so sending our call_id here
@@ -202,6 +225,9 @@ func (m *textModel) mapMessages(req *aisdk.TextRequest) []map[string]any {
 					item["id"] = tc.ProviderID
 				}
 				input = append(input, item)
+=======
+				})
+>>>>>>> Stashed changes
 			}
 
 		case aisdk.RoleTool:
@@ -241,7 +267,10 @@ func (m *textModel) mapTools(req *aisdk.TextRequest) []map[string]any {
 	return tools
 }
 
+<<<<<<< Updated upstream
 // mapWebSearch translates aisdk.WebSearch into the Responses API web_search_preview tool.
+=======
+>>>>>>> Stashed changes
 func mapWebSearch(w *aisdk.WebSearch) map[string]any {
 	tool := map[string]any{"type": "web_search_preview"}
 	if len(w.AllowedDomains) > 0 {
@@ -266,8 +295,12 @@ func mapWebSearch(w *aisdk.WebSearch) map[string]any {
 	return tool
 }
 
+<<<<<<< Updated upstream
 // mapResponseFormat translates our ResponseFormat into the Responses API "text" object.
 func (m *textModel) mapResponseFormat(rf *aisdk.ResponseFormat) map[string]any {
+=======
+func mapResponseFormat(rf *aisdk.ResponseFormat) map[string]any {
+>>>>>>> Stashed changes
 	switch rf.Type {
 	case "json_object":
 		return map[string]any{"format": map[string]any{"type": "json_object"}}
@@ -286,12 +319,15 @@ func (m *textModel) mapResponseFormat(rf *aisdk.ResponseFormat) map[string]any {
 
 // --- Response parsing (non-streaming) ---
 
+<<<<<<< Updated upstream
 // parseResponsesResult flattens the Responses API output array into a TextResult.
 // Output items can be:
 //   - {type:"message", content:[{type:"output_text", text:...}]}
 //   - {type:"function_call", id, call_id, name, arguments}
 //   - {type:"reasoning", id, summary} — informational, ignored
 //   - {type:"web_search_call", ...} — informational, ignored
+=======
+>>>>>>> Stashed changes
 func parseResponsesResult(resp *responsesAPIResponse) *aisdk.TextResult {
 	result := &aisdk.TextResult{
 		Usage: aisdk.Usage{
@@ -313,10 +349,16 @@ func parseResponsesResult(resp *responsesAPIResponse) *aisdk.TextResult {
 			}
 		case "function_call":
 			result.ToolCalls = append(result.ToolCalls, aisdk.ToolCallData{
+<<<<<<< Updated upstream
 				ID:         firstNonEmpty(item.CallID, item.ID),
 				ProviderID: item.ID,
 				Name:       item.Name,
 				Arguments:  json.RawMessage(item.Arguments),
+=======
+				ID:        firstNonEmpty(item.CallID, item.ID),
+				Name:      item.Name,
+				Arguments: json.RawMessage(item.Arguments),
+>>>>>>> Stashed changes
 			})
 		}
 	}
@@ -346,6 +388,7 @@ func mapResponsesFinishReason(status, lastItemType string, hasToolCalls bool) ai
 // --- Streaming (SSE) ---
 
 // parseResponsesSSEStream consumes the Responses API event stream and emits
+<<<<<<< Updated upstream
 // aisdk.StreamEvents on ch. Reference event types (subset that we care about):
 //
 //	response.created                       → StreamStart context (no event emitted; agent wraps it)
@@ -355,6 +398,15 @@ func mapResponsesFinishReason(status, lastItemType string, hasToolCalls bool) ai
 //	response.function_call_arguments.delta → accumulate arguments per item
 //	response.function_call_arguments.done  → emit ToolCallEvent
 //	response.completed                     → StreamEnd (with usage)
+=======
+// aisdk.StreamEvents on ch. Event subset handled:
+//
+//	response.output_text.delta             → TextDelta
+//	response.output_item.added             → start tracking a function_call
+//	response.function_call_arguments.delta → accumulate arguments
+//	response.function_call_arguments.done  → emit ToolCallEvent
+//	response.completed                     → StreamEnd (with usage + finish reason)
+>>>>>>> Stashed changes
 //	response.failed | error                → ErrorEvent
 func parseResponsesSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
 	scanner := bufio.NewScanner(body)
@@ -362,12 +414,19 @@ func parseResponsesSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
+<<<<<<< Updated upstream
 	// Pending function_call items keyed by their item id, accumulating arguments.
 	type pendingCall struct {
 		providerID string // OpenAI's "fc_..." item id; needs to round-trip back
 		callID     string // OpenAI's "call_..."; matches function_call_output
 		name       string
 		arguments  strings.Builder
+=======
+	type pendingCall struct {
+		callID    string
+		name      string
+		arguments strings.Builder
+>>>>>>> Stashed changes
 	}
 	pending := map[string]*pendingCall{}
 
@@ -397,9 +456,14 @@ func parseResponsesSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
 		case "response.output_item.added":
 			if event.Item != nil && event.Item.Type == "function_call" {
 				pending[event.Item.ID] = &pendingCall{
+<<<<<<< Updated upstream
 					providerID: event.Item.ID,
 					callID:     firstNonEmpty(event.Item.CallID, event.Item.ID),
 					name:       event.Item.Name,
+=======
+					callID: firstNonEmpty(event.Item.CallID, event.Item.ID),
+					name:   event.Item.Name,
+>>>>>>> Stashed changes
 				}
 			}
 
@@ -418,17 +482,26 @@ func parseResponsesSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
 				args = event.Arguments
 			}
 			ch <- &aisdk.ToolCallEvent{
+<<<<<<< Updated upstream
 				ID:         call.callID,
 				ProviderID: call.providerID,
 				Name:       call.name,
 				Args:       json.RawMessage(args),
+=======
+				ID:   call.callID,
+				Name: call.name,
+				Args: json.RawMessage(args),
+>>>>>>> Stashed changes
 			}
 			hasToolCalls = true
 			delete(pending, event.ItemID)
 
 		case "response.completed":
 			usage := aisdk.Usage{}
+<<<<<<< Updated upstream
 			finish := aisdk.FinishStop
+=======
+>>>>>>> Stashed changes
 			if event.Response != nil {
 				usage = aisdk.Usage{
 					PromptTokens:     event.Response.Usage.InputTokens,
@@ -436,13 +509,21 @@ func parseResponsesSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
 					TotalTokens:      event.Response.Usage.TotalTokens,
 				}
 			}
+<<<<<<< Updated upstream
+=======
+			finish := aisdk.FinishStop
+>>>>>>> Stashed changes
 			if hasToolCalls {
 				finish = aisdk.FinishToolCalls
 			}
 			ch <- &aisdk.StreamEnd{FinishReason: finish, Usage: usage}
 
 		case "response.failed", "error":
+<<<<<<< Updated upstream
 			msg := "openai responses stream error"
+=======
+			msg := event.Type
+>>>>>>> Stashed changes
 			if event.Error != nil && event.Error.Message != "" {
 				msg = event.Error.Message
 			}
@@ -551,6 +632,7 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+<<<<<<< Updated upstream
 }
 
 // modelSupportsTemperature reports whether the given model accepts a custom
@@ -567,4 +649,22 @@ func modelSupportsTemperature(model string) bool {
 		return false
 	}
 	return true
+=======
+>>>>>>> Stashed changes
 }
+
+// modelSupportsTemperature reports whether the given model accepts a custom
+// temperature value. OpenAI's reasoning-tier models (o1/o3/o4 families) and
+// the gpt-5 family only accept the default temperature of 1 and reject any
+// other value.
+func modelSupportsTemperature(model string) bool {
+	switch {
+	case strings.HasPrefix(model, "o1"),
+		strings.HasPrefix(model, "o3"),
+		strings.HasPrefix(model, "o4"),
+		strings.HasPrefix(model, "gpt-5"):
+		return false
+	}
+	return true
+}
+

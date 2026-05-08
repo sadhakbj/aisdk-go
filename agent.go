@@ -198,7 +198,11 @@ func (a *BaseAgent) Prompt(ctx context.Context, prompt string, opts ...PromptOpt
 	return resp, nil
 }
 
-// Stream sends a streaming prompt to the model.
+// Stream sends a streaming prompt and runs the same agentic tool loop Prompt
+// runs — each model turn is streamed in real time, and when the model emits
+// tool_calls the agent executes them locally and resumes streaming on the
+// follow-up turn. ToolCallEvent and ToolResultEvent are forwarded so the UI
+// can display "calling X...", "done X" indicators between text deltas.
 func (a *BaseAgent) Stream(ctx context.Context, prompt string, opts ...PromptOption) (*Stream, error) {
 	o := applyPromptOptions(opts)
 
@@ -236,6 +240,7 @@ func (a *BaseAgent) Stream(ctx context.Context, prompt string, opts ...PromptOpt
 		hooks.BeforePrompt(ctx, p)
 	}
 
+<<<<<<< Updated upstream
 	// Build messages
 	messages := a.buildMessages(p)
 
@@ -261,13 +266,104 @@ func (a *BaseAgent) Stream(ctx context.Context, prompt string, opts ...PromptOpt
 	// Wrap the raw events with provider/model info. cancel runs after the
 	// underlying stream is fully drained so the timeout context is released.
 	wrappedCh := make(chan StreamEvent)
+=======
+	clientTools, builtinTools := splitTools(a.config.Tools)
+	maxSteps := a.config.MaxSteps
+	if maxSteps <= 0 {
+		maxSteps = 1
+	}
+
+	wrappedCh := make(chan StreamEvent, 8)
+
+>>>>>>> Stashed changes
 	go func() {
 		defer cancel()
 		defer close(wrappedCh)
+
 		wrappedCh <- &StreamStart{Provider: providerName, Model: modelName}
-		for event := range result.Events {
-			wrappedCh <- event
+
+		messages := a.buildMessages(p)
+
+		for step := 0; step < maxSteps; step++ {
+			req := &TextRequest{
+				Model:    modelName,
+				System:   a.config.Instructions,
+				Messages: messages,
+			}
+			if len(clientTools) > 0 {
+				req.Tools = ToolsToDefinitions(clientTools)
+			}
+			if len(builtinTools) > 0 {
+				req.BuiltinTools = builtinTools
+			}
+			a.applyOptions(req, o)
+
+			result, err := textModel.Stream(ctx, req)
+			if err != nil {
+				wrappedCh <- &ErrorEvent{Err: err, Recoverable: false}
+				return
+			}
+
+			// Drain this turn. Forward all events except StreamEnd (which we
+			// hold so we can decide whether to continue with another turn).
+			var pendingCalls []ToolCallData
+			var endEvent *StreamEnd
+
+			for ev := range result.Events {
+				switch e := ev.(type) {
+				case *ToolCallEvent:
+					pendingCalls = append(pendingCalls, ToolCallData{
+						ID:        e.ID,
+						Name:      e.Name,
+						Arguments: e.Args,
+					})
+					wrappedCh <- ev
+				case *StreamEnd:
+					endEvent = e
+				case *ErrorEvent:
+					wrappedCh <- ev
+					return
+				default:
+					wrappedCh <- ev
+				}
+			}
+
+			// No client tools to execute, or model is done → finalize.
+			if endEvent == nil {
+				wrappedCh <- &StreamEnd{FinishReason: FinishUnknown}
+				return
+			}
+			if len(pendingCalls) == 0 || len(clientTools) == 0 || endEvent.FinishReason != FinishToolCalls {
+				wrappedCh <- endEvent
+				return
+			}
+
+			// Execute the tools, emit ToolResultEvent for each, append results
+			// to messages so the next turn can read them.
+			messages = append(messages, AssistantWithToolCalls("", pendingCalls...))
+			for _, tc := range pendingCalls {
+				tool, found := FindTool(clientTools, tc.Name)
+				if !found {
+					errMsg := fmt.Sprintf("tool %q not found", tc.Name)
+					messages = append(messages, ToolErrorResult(tc.ID, fmt.Errorf("%s", errMsg)))
+					wrappedCh <- &ToolResultEvent{ID: tc.ID, Name: tc.Name, Result: errMsg, Err: fmt.Errorf("%s", errMsg)}
+					continue
+				}
+				toolResult, execErr := tool.Execute(ctx, tc.Arguments)
+				if execErr != nil {
+					messages = append(messages, ToolErrorResult(tc.ID, execErr))
+					wrappedCh <- &ToolResultEvent{ID: tc.ID, Name: tc.Name, Result: execErr.Error(), Err: execErr}
+				} else {
+					messages = append(messages, ToolResult(tc.ID, toolResult))
+					wrappedCh <- &ToolResultEvent{ID: tc.ID, Name: tc.Name, Result: toolResult}
+				}
+			}
+
+			// Loop: next turn will be streamed against the updated message list.
 		}
+
+		// Exhausted MaxSteps without the model finishing.
+		wrappedCh <- &StreamEnd{FinishReason: FinishLength}
 	}()
 
 	return NewStream(wrappedCh), nil
