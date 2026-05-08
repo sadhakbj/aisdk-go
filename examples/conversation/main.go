@@ -14,10 +14,13 @@ func main() {
 	ctx := context.Background()
 
 	// Create an agent
-	tutor := aisdk.Quick(aisdk.AgentConfig{
-		Model:        "smart",
+	tutor, err := aisdk.Quick(aisdk.AgentConfig{
+		Model:        "default",
 		Instructions: "You are a Go programming tutor. Keep answers concise. Build on previous context in the conversation.",
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Start a conversation for a user
 	tutor.ForUser("user-42")
@@ -53,10 +56,13 @@ func main() {
 	fmt.Println("\n--- Resuming conversation ---")
 
 	// Create a new agent instance (simulating a new request)
-	tutor2 := aisdk.Quick(aisdk.AgentConfig{
+	tutor2, err := aisdk.Quick(aisdk.AgentConfig{
 		Model:        "fast",
 		Instructions: "You are a Go programming tutor. Keep answers concise.",
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Resume the last conversation for this user
 	tutor2.ContinueLast("user-42")

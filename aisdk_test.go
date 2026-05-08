@@ -110,9 +110,14 @@ func TestQuickAgent(t *testing.T) {
 	ctx := t.Context()
 
 	// Quick without app -- uses global default
-	result, err := aisdk.Quick(aisdk.AgentConfig{
+	agent, err := aisdk.Quick(aisdk.AgentConfig{
 		Instructions: "You are a code reviewer.",
-	}).Prompt(ctx, "Review this code")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := agent.Prompt(ctx, "Review this code")
 	if err != nil {
 		t.Fatal(err)
 	}

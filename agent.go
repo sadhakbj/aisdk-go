@@ -31,15 +31,16 @@ type AgentConfig struct {
 	Provider     string
 	Model        string
 	Instructions string
-	// Tools is the list of tools the agent can use. Pass both client-side tools
-	// (implement Tool.Execute) and provider-native tools (e.g. &aisdk.WebSearch{})
-	// in the same slice — the agent splits them automatically.
-	Tools      []Tool
-	MaxSteps   int
+	// Tools is the unified list of tools the agent can use. It accepts both
+	// client-side tools (anything implementing Executable) and provider-native
+	// tools (anything implementing BuiltinTool, e.g. &aisdk.WebSearch{}). The
+	// agent dispatches each one to the right code path automatically.
+	Tools       []Tool
+	MaxSteps    int
 	Temperature float64
-	MaxTokens  int
-	Timeout    time.Duration
-	Middleware []Middleware
+	MaxTokens   int
+	Timeout     time.Duration
+	Middleware  []Middleware
 	// Hooks receives BeforePrompt / AfterPrompt. Use this when you embed BaseAgent
 	// in another struct: methods on the outer type are not discovered automatically,
 	// so set Hooks instead of relying on embedding for AgentHooks.
@@ -88,10 +89,11 @@ func NewBaseAgentWithApp(app *App, config AgentConfig) BaseAgent {
 }
 
 // App returns the associated App instance.
-// If no explicit App was set, returns the global default App.
-func (a *BaseAgent) App() *App {
+// If no explicit App was set, falls back to the global default App and
+// surfaces ErrNotConfigured when Configure has not been called.
+func (a *BaseAgent) App() (*App, error) {
 	if a.app != nil {
-		return a.app
+		return a.app, nil
 	}
 	return DefaultApp()
 }
@@ -129,13 +131,17 @@ func (a *BaseAgent) ContinueLast(userID string) {
 func (a *BaseAgent) Prompt(ctx context.Context, prompt string, opts ...PromptOption) (*Response, error) {
 	o := applyPromptOptions(opts)
 
-	// Resolve provider and model
-	providerName, modelName, err := a.resolveProviderModel(o)
+	app, err := a.App()
 	if err != nil {
 		return nil, err
 	}
 
-	textModel, err := a.getTextModel(providerName, modelName)
+	providerName, modelName, err := a.resolveProviderModel(app, o)
+	if err != nil {
+		return nil, err
+	}
+
+	textModel, err := a.getTextModel(app, providerName, modelName)
 	if err != nil {
 		return nil, err
 	}
@@ -151,8 +157,7 @@ func (a *BaseAgent) Prompt(ctx context.Context, prompt string, opts ...PromptOpt
 		defer cancel()
 	}
 
-	// Build the prompt
-	p, err := a.buildPrompt(ctx, prompt)
+	p, err := a.buildPrompt(ctx, app, prompt)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +169,7 @@ func (a *BaseAgent) Prompt(ctx context.Context, prompt string, opts ...PromptOpt
 
 	// Build the core handler
 	handler := func(ctx context.Context, p *Prompt) (*Response, error) {
-		return a.executePrompt(ctx, textModel, providerName, modelName, p, o)
+		return a.executePrompt(ctx, textModel, modelName, p, o)
 	}
 
 	// Run through middleware
@@ -178,9 +183,12 @@ func (a *BaseAgent) Prompt(ctx context.Context, prompt string, opts ...PromptOpt
 		hooks.AfterPrompt(ctx, resp)
 	}
 
-	// Store conversation messages
+	// Persist conversation messages. A storage failure surfaces as an error
+	// rather than silently dropping history.
 	if a.userID != "" {
-		a.storeConversation(ctx, prompt, resp)
+		if err := a.storeConversation(ctx, app, prompt, resp); err != nil {
+			return nil, fmt.Errorf("aisdk: persist conversation: %w", err)
+		}
 	}
 
 	resp.Provider = providerName
@@ -194,12 +202,17 @@ func (a *BaseAgent) Prompt(ctx context.Context, prompt string, opts ...PromptOpt
 func (a *BaseAgent) Stream(ctx context.Context, prompt string, opts ...PromptOption) (*Stream, error) {
 	o := applyPromptOptions(opts)
 
-	providerName, modelName, err := a.resolveProviderModel(o)
+	app, err := a.App()
 	if err != nil {
 		return nil, err
 	}
 
-	textModel, err := a.getTextModel(providerName, modelName)
+	providerName, modelName, err := a.resolveProviderModel(app, o)
+	if err != nil {
+		return nil, err
+	}
+
+	textModel, err := a.getTextModel(app, providerName, modelName)
 	if err != nil {
 		return nil, err
 	}
@@ -208,15 +221,14 @@ func (a *BaseAgent) Stream(ctx context.Context, prompt string, opts ...PromptOpt
 	if o.timeout != nil {
 		timeout = *o.timeout
 	}
+	cancel := context.CancelFunc(func() {})
 	if timeout > 0 {
-		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
-		// cancel will be called when stream is done
-		_ = cancel
 	}
 
-	p, err := a.buildPrompt(ctx, prompt)
+	p, err := a.buildPrompt(ctx, app, prompt)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
@@ -227,31 +239,30 @@ func (a *BaseAgent) Stream(ctx context.Context, prompt string, opts ...PromptOpt
 	// Build messages
 	messages := a.buildMessages(p)
 
-	clientTools, builtinTools := splitTools(a.config.Tools)
-
 	req := &TextRequest{
 		Model:    modelName,
 		System:   a.config.Instructions,
 		Messages: messages,
 	}
 
-	if len(clientTools) > 0 {
-		req.Tools = ToolsToDefinitions(clientTools)
-	}
-	if len(builtinTools) > 0 {
-		req.BuiltinTools = builtinTools
+	if len(a.config.Tools) > 0 {
+		req.Tools = ToolsToDefinitions(a.config.Tools)
+		req.BuiltinTools = splitBuiltins(a.config.Tools)
 	}
 
 	a.applyOptions(req, o)
 
 	result, err := textModel.Stream(ctx, req)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
-	// Wrap the raw events with provider/model info
+	// Wrap the raw events with provider/model info. cancel runs after the
+	// underlying stream is fully drained so the timeout context is released.
 	wrappedCh := make(chan StreamEvent)
 	go func() {
+		defer cancel()
 		defer close(wrappedCh)
 		wrappedCh <- &StreamStart{Provider: providerName, Model: modelName}
 		for event := range result.Events {
@@ -264,7 +275,7 @@ func (a *BaseAgent) Stream(ctx context.Context, prompt string, opts ...PromptOpt
 
 // --- Internal helpers ---
 
-func (a *BaseAgent) resolveProviderModel(o *promptOptions) (string, string, error) {
+func (a *BaseAgent) resolveProviderModel(app *App, o *promptOptions) (string, string, error) {
 	modelInput := a.config.Model
 
 	// Option overrides take precedence
@@ -274,7 +285,7 @@ func (a *BaseAgent) resolveProviderModel(o *promptOptions) (string, string, erro
 
 	// Always resolve through ResolveModel — handles "smart", "fast",
 	// "provider/model", aliases, empty string, everything.
-	providerName, modelName, err := a.App().ResolveModel(modelInput)
+	providerName, modelName, err := app.ResolveModel(modelInput)
 	if err != nil {
 		return "", "", err
 	}
@@ -289,22 +300,22 @@ func (a *BaseAgent) resolveProviderModel(o *promptOptions) (string, string, erro
 	return providerName, modelName, nil
 }
 
-func (a *BaseAgent) getTextModel(providerName, modelName string) (TextModel, error) {
-	p, err := a.App().Provider(providerName)
+func (a *BaseAgent) getTextModel(app *App, providerName, modelName string) (TextModel, error) {
+	p, err := app.Provider(providerName)
 	if err != nil {
 		return nil, err
 	}
 	return p.TextModel(modelName), nil
 }
 
-func (a *BaseAgent) buildPrompt(ctx context.Context, prompt string) (*Prompt, error) {
+func (a *BaseAgent) buildPrompt(ctx context.Context, app *App, prompt string) (*Prompt, error) {
 	p := &Prompt{
 		Text: prompt,
 	}
 
 	// Load conversation messages if applicable
 	if a.conversationID != "" && a.userID != "" {
-		convMsgs, err := a.loadConversationMessages(ctx)
+		convMsgs, err := a.loadConversationMessages(ctx, app)
 		if err != nil {
 			// Non-fatal: just start fresh
 			p.Messages = nil
@@ -343,7 +354,7 @@ func (a *BaseAgent) applyOptions(req *TextRequest, o *promptOptions) {
 	}
 }
 
-func (a *BaseAgent) executePrompt(ctx context.Context, textModel TextModel, providerName, modelName string, p *Prompt, o *promptOptions) (*Response, error) {
+func (a *BaseAgent) executePrompt(ctx context.Context, textModel TextModel, modelName string, p *Prompt, o *promptOptions) (*Response, error) {
 	messages := a.buildMessages(p)
 
 	var allSteps []Step
@@ -356,8 +367,6 @@ func (a *BaseAgent) executePrompt(ctx context.Context, textModel TextModel, prov
 		maxSteps = 1
 	}
 
-	clientTools, builtinTools := splitTools(a.config.Tools)
-
 	for step := 0; step < maxSteps; step++ {
 		req := &TextRequest{
 			Model:    modelName,
@@ -365,11 +374,9 @@ func (a *BaseAgent) executePrompt(ctx context.Context, textModel TextModel, prov
 			Messages: messages,
 		}
 
-		if len(clientTools) > 0 {
-			req.Tools = ToolsToDefinitions(clientTools)
-		}
-		if len(builtinTools) > 0 {
-			req.BuiltinTools = builtinTools
+		if len(a.config.Tools) > 0 {
+			req.Tools = ToolsToDefinitions(a.config.Tools)
+			req.BuiltinTools = splitBuiltins(a.config.Tools)
 		}
 
 		a.applyOptions(req, o)
@@ -389,7 +396,7 @@ func (a *BaseAgent) executePrompt(ctx context.Context, textModel TextModel, prov
 		}
 
 		// If no tool calls, we're done
-		if len(result.ToolCalls) == 0 || len(clientTools) == 0 {
+		if len(result.ToolCalls) == 0 || len(a.config.Tools) == 0 {
 			allSteps = append(allSteps, stepData)
 			return &Response{
 				Text:         result.Content,
@@ -410,7 +417,7 @@ func (a *BaseAgent) executePrompt(ctx context.Context, textModel TextModel, prov
 
 		var stepToolResults []ToolResultData
 		for _, tc := range result.ToolCalls {
-			tool, found := FindTool(clientTools, tc.Name)
+			tool, found := FindExecutable(a.config.Tools, tc.Name)
 			if !found {
 				errMsg := fmt.Sprintf("tool %q not found", tc.Name)
 				messages = append(messages, ToolErrorResult(tc.ID, fmt.Errorf("%s", errMsg)))
@@ -451,46 +458,51 @@ func (a *BaseAgent) executePrompt(ctx context.Context, textModel TextModel, prov
 	}, nil
 }
 
-func (a *BaseAgent) loadConversationMessages(ctx context.Context) ([]Message, error) {
-	store := a.App().Store()
+func (a *BaseAgent) loadConversationMessages(ctx context.Context, app *App) ([]Message, error) {
+	store := app.Store()
 
+	var msgs []Message
 	if a.conversationID == "__latest__" {
 		conv, err := store.LatestForUser(ctx, a.userID)
 		if err != nil {
 			return nil, err
 		}
 		a.conversationID = conv.ID
-		return conv.Messages, nil
+		msgs = conv.Messages
+	} else {
+		conv, err := store.Load(ctx, a.conversationID)
+		if err != nil {
+			return nil, err
+		}
+		msgs = conv.Messages
 	}
 
-	conv, err := store.Load(ctx, a.conversationID)
-	if err != nil {
-		return nil, err
+	// Trim history to the configured cap so prompts don't grow unbounded.
+	limit := app.Config().MaxConversationMessages
+	if limit > 0 && len(msgs) > limit {
+		msgs = msgs[len(msgs)-limit:]
 	}
-	return conv.Messages, nil
+	return msgs, nil
 }
 
-func (a *BaseAgent) storeConversation(ctx context.Context, prompt string, resp *Response) {
-	store := a.App().Store()
+func (a *BaseAgent) storeConversation(ctx context.Context, app *App, prompt string, resp *Response) error {
+	store := app.Store()
 
 	if a.conversationID == "" || a.conversationID == "__latest__" {
-		// Create new conversation
 		conv := &Conversation{
 			UserID: a.userID,
 			Title:  truncate(prompt, 100),
 		}
 		if err := store.Store(ctx, conv); err != nil {
-			return
+			return err
 		}
 		a.conversationID = conv.ID
 	}
 
-	// Append user message and assistant response
-	msgs := []Message{
+	return store.AppendMessages(ctx, a.conversationID, []Message{
 		User(prompt),
 		Assistant(resp.Text),
-	}
-	_ = store.AppendMessages(ctx, a.conversationID, msgs)
+	})
 }
 
 func (a *BaseAgent) findHooks() (AgentHooks, bool) {
@@ -503,20 +515,6 @@ func (a *BaseAgent) findHooks() (AgentHooks, bool) {
 }
 
 // --- Helpers ---
-
-// splitTools separates a mixed Tool slice into client-side tools (have Execute)
-// and provider-native BuiltinTools (e.g. WebSearch). This lets callers put
-// everything in one AgentConfig.Tools list, similar to other multi-capability agent APIs.
-func splitTools(tools []Tool) (clientTools []Tool, builtinTools []BuiltinTool) {
-	for _, t := range tools {
-		if bt, ok := t.(BuiltinTool); ok {
-			builtinTools = append(builtinTools, bt)
-		} else {
-			clientTools = append(clientTools, t)
-		}
-	}
-	return
-}
 
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {

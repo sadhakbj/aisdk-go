@@ -1,6 +1,9 @@
 package aisdk
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // Role represents the role of a message in a conversation.
 type Role string
@@ -23,10 +26,21 @@ type Message struct {
 }
 
 // ToolCallData represents a tool call made by the assistant.
+//
+// ID is the SDK-facing identifier we use to pair this call with its result
+// (Message.ToolCallID on the matching tool message). For OpenAI's Responses
+// API this corresponds to the `call_id` field (e.g. "call_..."), since that
+// is the matcher between function_call and function_call_output.
+//
+// ProviderID is the provider's own item identifier (OpenAI's `id` field on a
+// function_call output item, e.g. "fc_..."). It is opaque to the SDK and is
+// echoed back verbatim when re-sending the assistant turn so providers that
+// require a specific format (OpenAI does) accept the round-trip.
 type ToolCallData struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
+	ID         string          `json:"id"`
+	ProviderID string          `json:"provider_id,omitempty"`
+	Name       string          `json:"name"`
+	Arguments  json.RawMessage `json:"arguments"`
 }
 
 // ToolResultData represents the result of a tool execution.
@@ -73,9 +87,18 @@ func AssistantWithToolCalls(content string, toolCalls ...ToolCallData) Message {
 	return Message{Role: RoleAssistant, Content: content, ToolCalls: toolCalls}
 }
 
-// ToolResult creates a tool result message.
+// ToolResult creates a tool result message. If result cannot be marshaled to
+// JSON, falls back to its fmt %v form and flags the message as an error so the
+// failure is visible to the model rather than silently producing empty content.
 func ToolResult(toolCallID string, result any) Message {
-	b, _ := json.Marshal(result)
+	b, err := json.Marshal(result)
+	if err != nil {
+		return Message{
+			Role:       RoleTool,
+			Content:    fmt.Sprintf("tool result marshal failed: %v; value=%v", err, result),
+			ToolCallID: toolCallID,
+		}
+	}
 	return Message{Role: RoleTool, Content: string(b), ToolCallID: toolCallID}
 }
 

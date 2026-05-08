@@ -104,15 +104,19 @@ func Configure(cfg *Config) {
 	defaultApp = app
 }
 
-// DefaultApp returns the global default App.
-// Panics if Configure() has not been called.
-func DefaultApp() *App {
+// ErrNotConfigured is returned by DefaultApp when Configure has not been
+// called and no SetDefaultApp override has been provided.
+var ErrNotConfigured = fmt.Errorf("aisdk: not configured. Call aisdk.Configure() first, or import your config package (e.g. import _ \"yourapp/config\")")
+
+// DefaultApp returns the global default App, or ErrNotConfigured if Configure
+// has not been called.
+func DefaultApp() (*App, error) {
 	defaultAppMu.RLock()
 	defer defaultAppMu.RUnlock()
 	if defaultApp == nil {
-		panic("aisdk: not configured. Call aisdk.Configure() first, or import your config package (e.g. import _ \"yourapp/config\")")
+		return nil, ErrNotConfigured
 	}
-	return defaultApp
+	return defaultApp, nil
 }
 
 // SetDefaultApp sets a custom App as the global default.
@@ -121,13 +125,6 @@ func SetDefaultApp(app *App) {
 	defaultAppMu.Lock()
 	defer defaultAppMu.Unlock()
 	defaultApp = app
-}
-
-// hasDefaultApp returns true if Configure() has been called.
-func hasDefaultApp() bool {
-	defaultAppMu.RLock()
-	defer defaultAppMu.RUnlock()
-	return defaultApp != nil
 }
 
 // --- App ---

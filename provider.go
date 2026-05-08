@@ -1,10 +1,6 @@
 package aisdk
 
-import (
-	"context"
-	"encoding/json"
-	"fmt"
-)
+import "context"
 
 // Provider represents an AI provider (OpenAI, Anthropic, etc.).
 // Implement this interface to add a new provider to the SDK.
@@ -66,23 +62,27 @@ type ToolDef struct {
 }
 
 // BuiltinTool marks a tool that is executed natively by the AI provider's
-// servers, not by client code. Unlike Tool, there is no Execute method —
-// the provider translates it to its own API format.
+// servers, not by client code. Unlike Executable, there is no Execute method —
+// the provider translates it to its own API format. BuiltinTools are placed in
+// the same AgentConfig.Tools slice as client-side tools; the agent dispatches
+// each one to the right code path by type assertion.
 type BuiltinTool interface {
+	Tool
 	builtinToolName() string
 }
 
 // WebSearch enables the AI provider's built-in web search capability.
 // No third-party API key required — the provider handles searching server-side.
 //
-// Usage:
+// Pass it in the same AgentConfig.Tools slice as your client-side tools:
 //
 //	agent := aisdk.NewBaseAgent(aisdk.AgentConfig{
-//	    BuiltinTools: []aisdk.BuiltinTool{
+//	    Tools: []aisdk.Tool{
 //	        &aisdk.WebSearch{
 //	            AllowedDomains: []string{"pubmed.ncbi.nlm.nih.gov", "who.int"},
 //	            UserLocation:   &aisdk.WebSearchLocation{Country: "US", City: "New York"},
 //	        },
+//	        &MyClientTool{},
 //	    },
 //	})
 type WebSearch struct {
@@ -108,18 +108,8 @@ type WebSearchLocation struct {
 	Timezone string
 }
 
+func (w *WebSearch) Name() string            { return "web_search" }
 func (w *WebSearch) builtinToolName() string { return "web_search" }
-
-// WebSearch implements Tool so it can be added to AgentConfig.Tools alongside
-// regular client-side tools. The agent detects it as a BuiltinTool and sends
-// it to the provider as a native capability rather than a function definition.
-
-func (w *WebSearch) Name() string        { return "web_search" }
-func (w *WebSearch) Description() string { return "Search the web for current information." }
-func (w *WebSearch) Parameters() any     { return nil }
-func (w *WebSearch) Execute(_ context.Context, _ json.RawMessage) (any, error) {
-	return nil, fmt.Errorf("web_search is executed server-side by the AI provider")
-}
 
 // ResponseFormat controls structured output mode.
 type ResponseFormat struct {

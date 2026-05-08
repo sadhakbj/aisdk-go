@@ -42,9 +42,10 @@ func (e *ReasoningDelta) eventType() string { return "reasoning_delta" }
 
 // ToolCallEvent is emitted when the model invokes a tool.
 type ToolCallEvent struct {
-	ID   string          `json:"id"`
-	Name string          `json:"name"`
-	Args json.RawMessage `json:"args"`
+	ID         string          `json:"id"`
+	ProviderID string          `json:"provider_id,omitempty"`
+	Name       string          `json:"name"`
+	Args       json.RawMessage `json:"args"`
 }
 
 func (e *ToolCallEvent) eventType() string { return "tool_call" }
@@ -108,9 +109,10 @@ func (s *Stream) Events() <-chan StreamEvent {
 				s.text += e.Text
 			case *ToolCallEvent:
 				s.toolCalls = append(s.toolCalls, ToolCallData{
-					ID:        e.ID,
-					Name:      e.Name,
-					Arguments: e.Args,
+					ID:         e.ID,
+					ProviderID: e.ProviderID,
+					Name:       e.Name,
+					Arguments:  e.Args,
 				})
 			case *ToolResultEvent:
 				s.toolResults = append(s.toolResults, ToolResultData{

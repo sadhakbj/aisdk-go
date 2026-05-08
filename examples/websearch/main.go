@@ -35,7 +35,7 @@ type ResearchAssistant struct {
 func NewResearchAssistant() *ResearchAssistant {
 	return &ResearchAssistant{
 		BaseAgent: aisdk.NewBaseAgent(aisdk.AgentConfig{
-			Model: "smart",
+			Model: "default",
 			Instructions: "You are a helpful research assistant with access to the web. " +
 				"Search for accurate, up-to-date information when needed.",
 			Tools: []aisdk.Tool{

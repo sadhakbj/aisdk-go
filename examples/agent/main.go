@@ -109,7 +109,7 @@ func main() {
 
 	// Override model per-call
 	result, err = assistant.Prompt(ctx, "What about London?",
-		aisdk.WithModel("smart"),
+		aisdk.WithModel("default"),
 	)
 	if err != nil {
 		log.Fatal(err)

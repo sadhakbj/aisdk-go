@@ -1,5 +1,10 @@
 // Package openai provides the OpenAI provider for aisdk-go.
 //
+// All text generation routes through the modern Responses API
+// (POST /v1/responses). The legacy Chat Completions endpoint is no longer
+// used because the gpt-5.4 family and newer reasoning-tier models are only
+// served by /v1/responses.
+//
 // Import this package to register the OpenAI provider:
 //
 //	import _ "github.com/sadhakbj/aisdk-go/providers/openai"
@@ -64,182 +69,9 @@ type textModel struct {
 	model    string
 }
 
+// Generate performs a synchronous /v1/responses request.
 func (m *textModel) Generate(ctx context.Context, req *aisdk.TextRequest) (*aisdk.TextResult, error) {
-	// WebSearch requires the Responses API — a different endpoint and format.
-	if hasWebSearch(req.BuiltinTools) {
-		return m.generateWithResponses(ctx, req)
-	}
-
-	body := m.buildRequestBody(req, false)
-
-	respBody, err := m.doRequest(ctx, m.provider.config.baseURL()+"/chat/completions", body)
-	if err != nil {
-		return nil, err
-	}
-	defer respBody.Close()
-
-	var apiResp chatCompletionResponse
-	if err := json.NewDecoder(respBody).Decode(&apiResp); err != nil {
-		return nil, fmt.Errorf("openai: failed to decode response: %w", err)
-	}
-
-	if len(apiResp.Choices) == 0 {
-		return &aisdk.TextResult{
-			FinishReason: aisdk.FinishUnknown,
-			Usage:        convertUsage(apiResp.Usage),
-		}, nil
-	}
-
-	choice := apiResp.Choices[0]
-	result := &aisdk.TextResult{
-		Content:      choice.Message.Content,
-		FinishReason: mapFinishReason(choice.FinishReason),
-		Usage:        convertUsage(apiResp.Usage),
-	}
-
-	for _, tc := range choice.Message.ToolCalls {
-		result.ToolCalls = append(result.ToolCalls, aisdk.ToolCallData{
-			ID:        tc.ID,
-			Name:      tc.Function.Name,
-			Arguments: json.RawMessage(tc.Function.Arguments),
-		})
-	}
-
-	return result, nil
-}
-
-func (m *textModel) Stream(ctx context.Context, req *aisdk.TextRequest) (*aisdk.TextStreamResult, error) {
-	// WebSearch requires the Responses API — a different endpoint and format.
-	if hasWebSearch(req.BuiltinTools) {
-		return m.streamWithResponses(ctx, req)
-	}
-
-	body := m.buildRequestBody(req, true)
-
-	respBody, err := m.doRequest(ctx, m.provider.config.baseURL()+"/chat/completions", body)
-	if err != nil {
-		return nil, err
-	}
-
-	ch := make(chan aisdk.StreamEvent)
-
-	go func() {
-		defer close(ch)
-		defer respBody.Close()
-		m.parseSSEStream(respBody, ch)
-	}()
-
-	return &aisdk.TextStreamResult{Events: ch}, nil
-}
-
-// --- Chat Completions (standard, no web search) ---
-
-func (m *textModel) buildRequestBody(req *aisdk.TextRequest, stream bool) map[string]any {
-	body := map[string]any{
-		"model": m.model,
-	}
-
-	if stream {
-		body["stream"] = true
-		body["stream_options"] = map[string]any{"include_usage": true}
-	}
-
-	// Build messages
-	var messages []map[string]any
-
-	if req.System != "" {
-		messages = append(messages, map[string]any{
-			"role":    "system",
-			"content": req.System,
-		})
-	}
-
-	for _, msg := range req.Messages {
-		m := map[string]any{
-			"role": string(msg.Role),
-		}
-		if msg.Content != "" {
-			m["content"] = msg.Content
-		}
-		if msg.ToolCallID != "" {
-			m["tool_call_id"] = msg.ToolCallID
-		}
-		if len(msg.ToolCalls) > 0 {
-			var toolCalls []map[string]any
-			for _, tc := range msg.ToolCalls {
-				toolCalls = append(toolCalls, map[string]any{
-					"id":   tc.ID,
-					"type": "function",
-					"function": map[string]any{
-						"name":      tc.Name,
-						"arguments": string(tc.Arguments),
-					},
-				})
-			}
-			m["tool_calls"] = toolCalls
-		}
-		messages = append(messages, m)
-	}
-
-	body["messages"] = messages
-
-	// Tools (client-side functions only)
-	if len(req.Tools) > 0 {
-		var tools []map[string]any
-		for _, t := range req.Tools {
-			tools = append(tools, map[string]any{
-				"type": "function",
-				"function": map[string]any{
-					"name":        t.Name,
-					"description": t.Description,
-					"parameters":  t.Parameters,
-				},
-			})
-		}
-		body["tools"] = tools
-	}
-
-	// Optional parameters
-	if req.Temperature != nil {
-		body["temperature"] = *req.Temperature
-	}
-	if req.MaxTokens != nil {
-		body["max_tokens"] = *req.MaxTokens
-	}
-	if req.TopP != nil {
-		body["top_p"] = *req.TopP
-	}
-	if len(req.StopSequences) > 0 {
-		body["stop"] = req.StopSequences
-	}
-
-	// Response format (structured output)
-	if req.ResponseFormat != nil {
-		switch req.ResponseFormat.Type {
-		case "json_object":
-			body["response_format"] = map[string]any{"type": "json_object"}
-		case "json_schema":
-			body["response_format"] = map[string]any{
-				"type": "json_schema",
-				"json_schema": map[string]any{
-					"name":   "response",
-					"strict": true,
-					"schema": req.ResponseFormat.JSONSchema,
-				},
-			}
-		}
-	}
-
-	return body
-}
-
-// --- Responses API (used for WebSearch) ---
-
-// generateWithResponses calls POST /v1/responses with the built-in web_search tool.
-// The Responses API works with the configured model and lets
-// the model decide when to search, unlike Chat Completions + web_search_options.
-func (m *textModel) generateWithResponses(ctx context.Context, req *aisdk.TextRequest) (*aisdk.TextResult, error) {
-	body := m.buildResponsesBody(req)
+	body := m.buildBody(req)
 
 	respBody, err := m.doRequest(ctx, m.provider.config.baseURL()+"/responses", body)
 	if err != nil {
@@ -249,15 +81,19 @@ func (m *textModel) generateWithResponses(ctx context.Context, req *aisdk.TextRe
 
 	var apiResp responsesAPIResponse
 	if err := json.NewDecoder(respBody).Decode(&apiResp); err != nil {
-		return nil, fmt.Errorf("openai: failed to decode responses API response: %w", err)
+		return nil, fmt.Errorf("openai: failed to decode response: %w", err)
+	}
+
+	if apiResp.Status == "failed" && apiResp.Error != nil {
+		return nil, fmt.Errorf("openai: response failed: %s", apiResp.Error.Message)
 	}
 
 	return parseResponsesResult(&apiResp), nil
 }
 
-// streamWithResponses calls POST /v1/responses with stream:true.
-func (m *textModel) streamWithResponses(ctx context.Context, req *aisdk.TextRequest) (*aisdk.TextStreamResult, error) {
-	body := m.buildResponsesBody(req)
+// Stream performs a streaming /v1/responses request.
+func (m *textModel) Stream(ctx context.Context, req *aisdk.TextRequest) (*aisdk.TextStreamResult, error) {
+	body := m.buildBody(req)
 	body["stream"] = true
 
 	respBody, err := m.doRequest(ctx, m.provider.config.baseURL()+"/responses", body)
@@ -276,81 +112,188 @@ func (m *textModel) streamWithResponses(ctx context.Context, req *aisdk.TextRequ
 	return &aisdk.TextStreamResult{Events: ch}, nil
 }
 
-func (m *textModel) buildResponsesBody(req *aisdk.TextRequest) map[string]any {
+// --- Request body construction ---
+
+// buildBody assembles the JSON payload for POST /v1/responses.
+func (m *textModel) buildBody(req *aisdk.TextRequest) map[string]any {
 	body := map[string]any{
 		"model": m.model,
+		"input": m.mapMessages(req),
 	}
 
-	// System prompt is "instructions" in the Responses API
 	if req.System != "" {
 		body["instructions"] = req.System
 	}
 
-	// Build input (messages)
-	var input []map[string]any
-	for _, msg := range req.Messages {
-		switch msg.Role {
-		case aisdk.RoleUser:
-			input = append(input, map[string]any{
-				"role":    "user",
-				"content": msg.Content,
-			})
-		case aisdk.RoleAssistant:
-			input = append(input, map[string]any{
-				"role":    "assistant",
-				"content": msg.Content,
-			})
-		}
-	}
-	body["input"] = input
-
-	// Built-in tools
-	var tools []map[string]any
-	for _, bt := range req.BuiltinTools {
-		switch v := bt.(type) {
-		case *aisdk.WebSearch:
-			tool := map[string]any{"type": "web_search"}
-			if len(v.AllowedDomains) > 0 {
-				tool["filters"] = map[string]any{"allowed_domains": v.AllowedDomains}
-			}
-			if v.UserLocation != nil {
-				loc := map[string]any{"type": "approximate"}
-				if v.UserLocation.Country != "" {
-					loc["country"] = v.UserLocation.Country
-				}
-				if v.UserLocation.City != "" {
-					loc["city"] = v.UserLocation.City
-				}
-				if v.UserLocation.Region != "" {
-					loc["region"] = v.UserLocation.Region
-				}
-				if v.UserLocation.Timezone != "" {
-					loc["timezone"] = v.UserLocation.Timezone
-				}
-				tool["user_location"] = loc
-			}
-			tools = append(tools, tool)
-		}
-	}
+	tools := m.mapTools(req)
 	if len(tools) > 0 {
 		body["tools"] = tools
+		body["tool_choice"] = "auto"
 	}
 
-	if req.Temperature != nil {
+	if req.Temperature != nil && modelSupportsTemperature(m.model) {
 		body["temperature"] = *req.Temperature
 	}
 	if req.MaxTokens != nil {
 		body["max_output_tokens"] = *req.MaxTokens
 	}
+	if req.TopP != nil {
+		body["top_p"] = *req.TopP
+	}
+
+	if req.ResponseFormat != nil {
+		body["text"] = m.mapResponseFormat(req.ResponseFormat)
+	}
 
 	return body
 }
 
-// parseResponsesResult extracts text and usage from a Responses API response.
-// It skips web_search_call output items and reads only message output items.
+// mapMessages converts our Message slice into the Responses API input array.
+//
+// Layout (matches OpenAI's /v1/responses input contract):
+//
+//	user      → {role:"user",      content:[{type:"input_text", text:...}]}
+//	assistant → {role:"assistant", content:[{type:"output_text", text:...}]}
+//	          + zero or more {type:"function_call", id, call_id, name, arguments}
+//	tool      → {type:"function_call_output", call_id, output:"<string>"}
+//
+// (System prompt is sent separately via the top-level "instructions" field.)
+func (m *textModel) mapMessages(req *aisdk.TextRequest) []map[string]any {
+	var input []map[string]any
+
+	for _, msg := range req.Messages {
+		switch msg.Role {
+		case aisdk.RoleSystem:
+			// Responses API has a top-level "instructions" field; if a system
+			// message slipped into the slice, fold it in as a system input.
+			input = append(input, map[string]any{
+				"role":    "system",
+				"content": msg.Content,
+			})
+
+		case aisdk.RoleUser:
+			input = append(input, map[string]any{
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": msg.Content},
+				},
+			})
+
+		case aisdk.RoleAssistant:
+			if msg.Content != "" {
+				input = append(input, map[string]any{
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": msg.Content},
+					},
+				})
+			}
+			for _, tc := range msg.ToolCalls {
+				item := map[string]any{
+					"type":      "function_call",
+					"call_id":   tc.ID,
+					"name":      tc.Name,
+					"arguments": string(tc.Arguments),
+				}
+				// Only include the provider-side id when we have it; OpenAI
+				// validates the format ("fc_..."), so sending our call_id here
+				// would be rejected.
+				if tc.ProviderID != "" {
+					item["id"] = tc.ProviderID
+				}
+				input = append(input, item)
+			}
+
+		case aisdk.RoleTool:
+			input = append(input, map[string]any{
+				"type":    "function_call_output",
+				"call_id": msg.ToolCallID,
+				"output":  msg.Content,
+			})
+		}
+	}
+
+	return input
+}
+
+// mapTools assembles the tools array, combining client-side function tools
+// with provider-native tools (e.g. WebSearch).
+func (m *textModel) mapTools(req *aisdk.TextRequest) []map[string]any {
+	var tools []map[string]any
+
+	for _, t := range req.Tools {
+		tools = append(tools, map[string]any{
+			"type":        "function",
+			"name":        t.Name,
+			"description": t.Description,
+			"strict":      true,
+			"parameters":  t.Parameters,
+		})
+	}
+
+	for _, bt := range req.BuiltinTools {
+		switch v := bt.(type) {
+		case *aisdk.WebSearch:
+			tools = append(tools, mapWebSearch(v))
+		}
+	}
+
+	return tools
+}
+
+// mapWebSearch translates aisdk.WebSearch into the Responses API web_search_preview tool.
+func mapWebSearch(w *aisdk.WebSearch) map[string]any {
+	tool := map[string]any{"type": "web_search_preview"}
+	if len(w.AllowedDomains) > 0 {
+		tool["filters"] = map[string]any{"allowed_domains": w.AllowedDomains}
+	}
+	if w.UserLocation != nil {
+		loc := map[string]any{"type": "approximate"}
+		if w.UserLocation.Country != "" {
+			loc["country"] = w.UserLocation.Country
+		}
+		if w.UserLocation.City != "" {
+			loc["city"] = w.UserLocation.City
+		}
+		if w.UserLocation.Region != "" {
+			loc["region"] = w.UserLocation.Region
+		}
+		if w.UserLocation.Timezone != "" {
+			loc["timezone"] = w.UserLocation.Timezone
+		}
+		tool["user_location"] = loc
+	}
+	return tool
+}
+
+// mapResponseFormat translates our ResponseFormat into the Responses API "text" object.
+func (m *textModel) mapResponseFormat(rf *aisdk.ResponseFormat) map[string]any {
+	switch rf.Type {
+	case "json_object":
+		return map[string]any{"format": map[string]any{"type": "json_object"}}
+	case "json_schema":
+		return map[string]any{
+			"format": map[string]any{
+				"type":   "json_schema",
+				"name":   "response",
+				"schema": rf.JSONSchema,
+				"strict": true,
+			},
+		}
+	}
+	return nil
+}
+
+// --- Response parsing (non-streaming) ---
+
+// parseResponsesResult flattens the Responses API output array into a TextResult.
+// Output items can be:
+//   - {type:"message", content:[{type:"output_text", text:...}]}
+//   - {type:"function_call", id, call_id, name, arguments}
+//   - {type:"reasoning", id, summary} — informational, ignored
+//   - {type:"web_search_call", ...} — informational, ignored
 func parseResponsesResult(resp *responsesAPIResponse) *aisdk.TextResult {
 	result := &aisdk.TextResult{
-		FinishReason: aisdk.FinishStop,
 		Usage: aisdk.Usage{
 			PromptTokens:     resp.Usage.InputTokens,
 			CompletionTokens: resp.Usage.OutputTokens,
@@ -358,33 +301,83 @@ func parseResponsesResult(resp *responsesAPIResponse) *aisdk.TextResult {
 		},
 	}
 
+	var lastItemType string
 	for _, item := range resp.Output {
-		if item.Type == "message" {
+		lastItemType = item.Type
+		switch item.Type {
+		case "message":
 			for _, part := range item.Content {
 				if part.Type == "output_text" {
 					result.Content += part.Text
 				}
 			}
+		case "function_call":
+			result.ToolCalls = append(result.ToolCalls, aisdk.ToolCallData{
+				ID:         firstNonEmpty(item.CallID, item.ID),
+				ProviderID: item.ID,
+				Name:       item.Name,
+				Arguments:  json.RawMessage(item.Arguments),
+			})
 		}
 	}
 
+	result.FinishReason = mapResponsesFinishReason(resp.Status, lastItemType, len(result.ToolCalls) > 0)
 	return result
 }
 
-// parseResponsesSSEStream parses the Responses API SSE stream.
+func mapResponsesFinishReason(status, lastItemType string, hasToolCalls bool) aisdk.FinishReason {
+	switch status {
+	case "incomplete":
+		return aisdk.FinishLength
+	case "failed":
+		return aisdk.FinishError
+	case "completed":
+		if hasToolCalls || lastItemType == "function_call" {
+			return aisdk.FinishToolCalls
+		}
+		return aisdk.FinishStop
+	}
+	if hasToolCalls {
+		return aisdk.FinishToolCalls
+	}
+	return aisdk.FinishUnknown
+}
+
+// --- Streaming (SSE) ---
+
+// parseResponsesSSEStream consumes the Responses API event stream and emits
+// aisdk.StreamEvents on ch. Reference event types (subset that we care about):
+//
+//	response.created                       → StreamStart context (no event emitted; agent wraps it)
+//	response.output_text.delta             → TextDelta
+//	response.output_text.done              → (informational)
+//	response.output_item.added             → start tracking a function_call item
+//	response.function_call_arguments.delta → accumulate arguments per item
+//	response.function_call_arguments.done  → emit ToolCallEvent
+//	response.completed                     → StreamEnd (with usage)
+//	response.failed | error                → ErrorEvent
 func parseResponsesSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
 	scanner := bufio.NewScanner(body)
 
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
+	// Pending function_call items keyed by their item id, accumulating arguments.
+	type pendingCall struct {
+		providerID string // OpenAI's "fc_..." item id; needs to round-trip back
+		callID     string // OpenAI's "call_..."; matches function_call_output
+		name       string
+		arguments  strings.Builder
+	}
+	pending := map[string]*pendingCall{}
+
+	hasToolCalls := false
+
 	for scanner.Scan() {
 		line := scanner.Text()
-
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
-
 		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
 			return
@@ -392,7 +385,7 @@ func parseResponsesSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
 
 		var event responsesSSEEvent
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			continue
+			continue // skip malformed event lines silently
 		}
 
 		switch event.Type {
@@ -400,18 +393,61 @@ func parseResponsesSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
 			if event.Delta != "" {
 				ch <- &aisdk.TextDelta{Text: event.Delta}
 			}
+
+		case "response.output_item.added":
+			if event.Item != nil && event.Item.Type == "function_call" {
+				pending[event.Item.ID] = &pendingCall{
+					providerID: event.Item.ID,
+					callID:     firstNonEmpty(event.Item.CallID, event.Item.ID),
+					name:       event.Item.Name,
+				}
+			}
+
+		case "response.function_call_arguments.delta":
+			if call, ok := pending[event.ItemID]; ok {
+				call.arguments.WriteString(event.Delta)
+			}
+
+		case "response.function_call_arguments.done":
+			call, ok := pending[event.ItemID]
+			if !ok {
+				continue
+			}
+			args := call.arguments.String()
+			if event.Arguments != "" {
+				args = event.Arguments
+			}
+			ch <- &aisdk.ToolCallEvent{
+				ID:         call.callID,
+				ProviderID: call.providerID,
+				Name:       call.name,
+				Args:       json.RawMessage(args),
+			}
+			hasToolCalls = true
+			delete(pending, event.ItemID)
+
 		case "response.completed":
+			usage := aisdk.Usage{}
+			finish := aisdk.FinishStop
 			if event.Response != nil {
-				usage := aisdk.Usage{
+				usage = aisdk.Usage{
 					PromptTokens:     event.Response.Usage.InputTokens,
 					CompletionTokens: event.Response.Usage.OutputTokens,
 					TotalTokens:      event.Response.Usage.TotalTokens,
 				}
-				ch <- &aisdk.StreamEnd{FinishReason: aisdk.FinishStop, Usage: usage}
 			}
+			if hasToolCalls {
+				finish = aisdk.FinishToolCalls
+			}
+			ch <- &aisdk.StreamEnd{FinishReason: finish, Usage: usage}
+
 		case "response.failed", "error":
+			msg := "openai responses stream error"
+			if event.Error != nil && event.Error.Message != "" {
+				msg = event.Error.Message
+			}
 			ch <- &aisdk.ErrorEvent{
-				Err:         fmt.Errorf("openai responses stream error: %s", event.Type),
+				Err:         fmt.Errorf("openai: %s", msg),
 				Recoverable: false,
 			}
 			return
@@ -460,167 +496,28 @@ func (m *textModel) doRequest(ctx context.Context, url string, body map[string]a
 	return resp.Body, nil
 }
 
-// --- SSE stream parsing (Chat Completions) ---
-
-func (m *textModel) parseSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
-	scanner := bufio.NewScanner(body)
-
-	// Track tool calls being built up incrementally
-	toolCalls := map[int]*toolCallAccumulator{}
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
-			return
-		}
-
-		var chunk chatCompletionChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			ch <- &aisdk.ErrorEvent{Err: fmt.Errorf("openai: failed to parse SSE chunk: %w", err), Recoverable: true}
-			continue
-		}
-
-		if len(chunk.Choices) == 0 {
-			// Usage-only chunk (sent at the end with stream_options)
-			if chunk.Usage != nil {
-				ch <- &aisdk.StreamEnd{
-					FinishReason: aisdk.FinishStop,
-					Usage:        convertUsagePtr(chunk.Usage),
-				}
-			}
-			continue
-		}
-
-		choice := chunk.Choices[0]
-		delta := choice.Delta
-
-		// Text content
-		if delta.Content != "" {
-			ch <- &aisdk.TextDelta{Text: delta.Content}
-		}
-
-		// Tool calls (streamed incrementally)
-		for _, tc := range delta.ToolCalls {
-			acc, exists := toolCalls[tc.Index]
-			if !exists {
-				acc = &toolCallAccumulator{ID: tc.ID, Name: tc.Function.Name}
-				toolCalls[tc.Index] = acc
-			}
-			acc.Arguments += tc.Function.Arguments
-		}
-
-		// Finish reason
-		if choice.FinishReason != "" {
-			reason := mapFinishReason(choice.FinishReason)
-
-			// Emit accumulated tool calls
-			if reason == aisdk.FinishToolCalls {
-				for _, acc := range toolCalls {
-					ch <- &aisdk.ToolCallEvent{
-						ID:   acc.ID,
-						Name: acc.Name,
-						Args: json.RawMessage(acc.Arguments),
-					}
-				}
-			}
-
-			// StreamEnd with usage if available
-			var usage aisdk.Usage
-			if chunk.Usage != nil {
-				usage = convertUsagePtr(chunk.Usage)
-			}
-			ch <- &aisdk.StreamEnd{FinishReason: reason, Usage: usage}
-		}
-	}
-}
-
-// --- API types: Chat Completions ---
-
-type chatCompletionResponse struct {
-	ID      string   `json:"id"`
-	Choices []choice `json:"choices"`
-	Usage   usage    `json:"usage"`
-}
-
-type choice struct {
-	Message      message `json:"message"`
-	FinishReason string  `json:"finish_reason"`
-}
-
-type message struct {
-	Role      string     `json:"role"`
-	Content   string     `json:"content"`
-	ToolCalls []toolCall `json:"tool_calls,omitempty"`
-}
-
-type toolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"`
-	Function functionCall `json:"function"`
-}
-
-type functionCall struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-}
-
-type usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-}
-
-type chatCompletionChunk struct {
-	ID      string        `json:"id"`
-	Choices []chunkChoice `json:"choices"`
-	Usage   *usage        `json:"usage,omitempty"`
-}
-
-type chunkChoice struct {
-	Delta        chunkDelta `json:"delta"`
-	FinishReason string     `json:"finish_reason"`
-}
-
-type chunkDelta struct {
-	Role      string          `json:"role,omitempty"`
-	Content   string          `json:"content,omitempty"`
-	ToolCalls []chunkToolCall `json:"tool_calls,omitempty"`
-}
-
-type chunkToolCall struct {
-	Index    int          `json:"index"`
-	ID       string       `json:"id,omitempty"`
-	Type     string       `json:"type,omitempty"`
-	Function functionCall `json:"function"`
-}
-
-type toolCallAccumulator struct {
-	ID        string
-	Name      string
-	Arguments string
-}
-
 // --- API types: Responses API ---
 
 type responsesAPIResponse struct {
-	ID     string               `json:"id"`
+	ID     string                `json:"id"`
+	Model  string                `json:"model"`
+	Status string                `json:"status"`
 	Output []responsesOutputItem `json:"output"`
-	Usage  responsesUsage       `json:"usage"`
+	Usage  responsesUsage        `json:"usage"`
+	Error  *responsesError       `json:"error,omitempty"`
 }
 
 type responsesOutputItem struct {
-	Type    string                `json:"type"` // "message" | "web_search_call"
-	Content []responsesContentPart `json:"content,omitempty"`
+	Type      string                 `json:"type"`
+	ID        string                 `json:"id,omitempty"`
+	CallID    string                 `json:"call_id,omitempty"`
+	Name      string                 `json:"name,omitempty"`
+	Arguments string                 `json:"arguments,omitempty"`
+	Content   []responsesContentPart `json:"content,omitempty"`
 }
 
 type responsesContentPart struct {
-	Type string `json:"type"` // "output_text"
+	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
 }
 
@@ -630,50 +527,44 @@ type responsesUsage struct {
 	TotalTokens  int `json:"total_tokens"`
 }
 
+type responsesError struct {
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
 type responsesSSEEvent struct {
-	Type     string                `json:"type"`
-	Delta    string                `json:"delta,omitempty"`
-	Response *responsesAPIResponse `json:"response,omitempty"`
+	Type      string                `json:"type"`
+	Delta     string                `json:"delta,omitempty"`
+	ItemID    string                `json:"item_id,omitempty"`
+	Item      *responsesOutputItem  `json:"item,omitempty"`
+	Arguments string                `json:"arguments,omitempty"`
+	Response  *responsesAPIResponse `json:"response,omitempty"`
+	Error     *responsesError       `json:"error,omitempty"`
 }
 
 // --- Helpers ---
 
-func convertUsage(u usage) aisdk.Usage {
-	return aisdk.Usage{
-		PromptTokens:     u.PromptTokens,
-		CompletionTokens: u.CompletionTokens,
-		TotalTokens:      u.TotalTokens,
-	}
-}
-
-func convertUsagePtr(u *usage) aisdk.Usage {
-	if u == nil {
-		return aisdk.Usage{}
-	}
-	return convertUsage(*u)
-}
-
-func mapFinishReason(reason string) aisdk.FinishReason {
-	switch reason {
-	case "stop":
-		return aisdk.FinishStop
-	case "tool_calls":
-		return aisdk.FinishToolCalls
-	case "length":
-		return aisdk.FinishLength
-	case "content_filter":
-		return aisdk.FinishContentFilter
-	default:
-		return aisdk.FinishUnknown
-	}
-}
-
-// hasWebSearch reports whether any builtin tool is a WebSearch.
-func hasWebSearch(tools []aisdk.BuiltinTool) bool {
-	for _, bt := range tools {
-		if _, ok := bt.(*aisdk.WebSearch); ok {
-			return true
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
 		}
 	}
-	return false
+	return ""
+}
+
+// modelSupportsTemperature reports whether the given model accepts a custom
+// temperature value. OpenAI's reasoning-tier models (o1/o3/o4 families) and
+// the gpt-5 family only accept the default temperature of 1 and reject any
+// other value with "Unsupported parameter: 'temperature' is not supported
+// with this model".
+func modelSupportsTemperature(model string) bool {
+	switch {
+	case strings.HasPrefix(model, "o1"),
+		strings.HasPrefix(model, "o3"),
+		strings.HasPrefix(model, "o4"),
+		strings.HasPrefix(model, "gpt-5"):
+		return false
+	}
+	return true
 }
