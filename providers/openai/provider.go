@@ -2,8 +2,8 @@
 //
 // All text generation routes through the modern Responses API
 // (POST /v1/responses). The legacy Chat Completions endpoint is no longer
-// used because the gpt-5.4 family and newer reasoning-tier models are only
-// served by /v1/responses.
+// used because the gpt-5.4 family and reasoning-tier models (o1/o3/o4) are
+// only served by /v1/responses.
 //
 // Import this package to register the OpenAI provider:
 //
@@ -142,7 +142,7 @@ func (m *textModel) buildBody(req *aisdk.TextRequest) map[string]any {
 	}
 
 	if req.ResponseFormat != nil {
-		body["text"] = m.mapResponseFormat(req.ResponseFormat)
+		body["text"] = mapResponseFormat(req.ResponseFormat)
 	}
 
 	return body
@@ -267,7 +267,7 @@ func mapWebSearch(w *aisdk.WebSearch) map[string]any {
 }
 
 // mapResponseFormat translates our ResponseFormat into the Responses API "text" object.
-func (m *textModel) mapResponseFormat(rf *aisdk.ResponseFormat) map[string]any {
+func mapResponseFormat(rf *aisdk.ResponseFormat) map[string]any {
 	switch rf.Type {
 	case "json_object":
 		return map[string]any{"format": map[string]any{"type": "json_object"}}
@@ -346,15 +346,13 @@ func mapResponsesFinishReason(status, lastItemType string, hasToolCalls bool) ai
 // --- Streaming (SSE) ---
 
 // parseResponsesSSEStream consumes the Responses API event stream and emits
-// aisdk.StreamEvents on ch. Reference event types (subset that we care about):
+// aisdk.StreamEvents on ch. Event subset handled:
 //
-//	response.created                       → StreamStart context (no event emitted; agent wraps it)
 //	response.output_text.delta             → TextDelta
-//	response.output_text.done              → (informational)
-//	response.output_item.added             → start tracking a function_call item
-//	response.function_call_arguments.delta → accumulate arguments per item
+//	response.output_item.added             → start tracking a function_call
+//	response.function_call_arguments.delta → accumulate arguments
 //	response.function_call_arguments.done  → emit ToolCallEvent
-//	response.completed                     → StreamEnd (with usage)
+//	response.completed                     → StreamEnd (with usage + finish reason)
 //	response.failed | error                → ErrorEvent
 func parseResponsesSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
 	scanner := bufio.NewScanner(body)
@@ -372,6 +370,7 @@ func parseResponsesSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
 	pending := map[string]*pendingCall{}
 
 	hasToolCalls := false
+	gotTextDelta := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -385,12 +384,13 @@ func parseResponsesSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
 
 		var event responsesSSEEvent
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			continue // skip malformed event lines silently
+			continue
 		}
 
 		switch event.Type {
 		case "response.output_text.delta":
 			if event.Delta != "" {
+				gotTextDelta = true
 				ch <- &aisdk.TextDelta{Text: event.Delta}
 			}
 
@@ -428,21 +428,29 @@ func parseResponsesSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
 
 		case "response.completed":
 			usage := aisdk.Usage{}
-			finish := aisdk.FinishStop
 			if event.Response != nil {
+				// Fallback: if the API delivered the full text only in
+				// response.completed (no per-token deltas), emit it now so
+				// callers that only listen to TextDelta still see the text.
+				if !gotTextDelta {
+					if text := extractResponsesText(event.Response.Output); text != "" {
+						ch <- &aisdk.TextDelta{Text: text}
+					}
+				}
 				usage = aisdk.Usage{
 					PromptTokens:     event.Response.Usage.InputTokens,
 					CompletionTokens: event.Response.Usage.OutputTokens,
 					TotalTokens:      event.Response.Usage.TotalTokens,
 				}
 			}
+			finish := aisdk.FinishStop
 			if hasToolCalls {
 				finish = aisdk.FinishToolCalls
 			}
 			ch <- &aisdk.StreamEnd{FinishReason: finish, Usage: usage}
 
 		case "response.failed", "error":
-			msg := "openai responses stream error"
+			msg := event.Type
 			if event.Error != nil && event.Error.Message != "" {
 				msg = event.Error.Message
 			}
@@ -453,6 +461,23 @@ func parseResponsesSSEStream(body io.Reader, ch chan<- aisdk.StreamEvent) {
 			return
 		}
 	}
+}
+
+// extractResponsesText pulls the concatenated output_text content from a
+// completed Responses API output array.
+func extractResponsesText(output []responsesOutputItem) string {
+	var sb strings.Builder
+	for _, item := range output {
+		if item.Type != "message" {
+			continue
+		}
+		for _, part := range item.Content {
+			if part.Type == "output_text" {
+				sb.WriteString(part.Text)
+			}
+		}
+	}
+	return sb.String()
 }
 
 // --- Shared HTTP helper ---
